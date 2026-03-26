@@ -5,13 +5,18 @@ type AppRoutes = never
 type PageRoutes = "/" | "/dashboard"
 type LayoutRoutes = never
 type RedirectRoutes = never
-type RewriteRoutes = never
+type RewriteRoutes = "/docs" | "/docs/[[...path]]" | "/docs/json" | "/health" | "/version"
 type Routes = AppRoutes | PageRoutes | LayoutRoutes | RedirectRoutes | RewriteRoutes
 
 
 interface ParamMap {
   "/": {}
   "/dashboard": {}
+  "/docs": {}
+  "/docs/[[...path]]": { "path"?: string[]; }
+  "/docs/json": {}
+  "/health": {}
+  "/version": {}
 }
 
 

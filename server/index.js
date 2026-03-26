@@ -14,6 +14,28 @@ const { registerSocketHandlers, userRoom } = require("./socket/register");
 const { ensureRuntimeDirs, webDir } = require("./utils/paths");
 const { SessionManager } = require("./whatsapp/session-manager");
 const openBrowser = openModule.default || openModule;
+function shouldProxyToBackend(req) {
+  const url = new URL(req.url || "/", "http://localhost");
+  return url.pathname === "/health" || url.pathname === "/version" || url.pathname === "/docs" || url.pathname.startsWith("/docs/");
+}
+
+async function proxyToBackend(req, res, config) {
+  const targetUrl = `${config.backendUrl}${req.url}`;
+  const response = await fetch(targetUrl, {
+    method: req.method,
+    headers: {
+      accept: req.headers.accept || "*/*"
+    }
+  });
+
+  res.statusCode = response.status;
+  response.headers.forEach((value, key) => {
+    res.setHeader(key, value);
+  });
+
+  const body = Buffer.from(await response.arrayBuffer());
+  res.end(body);
+}
 
 function ensureWebBuild(config) {
   if (config.dev) {
@@ -62,7 +84,20 @@ async function startOpenWA({ dev = false } = {}) {
   });
 
   const backendServer = createServer(app);
-  const frontendServer = createServer((req, res) => nextHandler(req, res));
+  const frontendServer = createServer(async (req, res) => {
+    try {
+      if (shouldProxyToBackend(req)) {
+        await proxyToBackend(req, res, config);
+        return;
+      }
+
+      await nextHandler(req, res);
+    } catch (error) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: error.message }));
+    }
+  });
   const io = new Server(backendServer, {
     cors: {
       origin: config.frontendUrl,

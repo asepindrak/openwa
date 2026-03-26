@@ -290,6 +290,32 @@
     "configFileName": "next.config.js",
     "turbopack": {
       "root": "E:\\PROJECT\\openwa"
+    },
+    "_originalRewrites": {
+      "beforeFiles": [],
+      "afterFiles": [
+        {
+          "source": "/docs",
+          "destination": "http://localhost:55222/docs"
+        },
+        {
+          "source": "/docs/json",
+          "destination": "http://localhost:55222/docs/json"
+        },
+        {
+          "source": "/docs/:path*",
+          "destination": "http://localhost:55222/docs/:path*"
+        },
+        {
+          "source": "/health",
+          "destination": "http://localhost:55222/health"
+        },
+        {
+          "source": "/version",
+          "destination": "http://localhost:55222/version"
+        }
+      ],
+      "fallback": []
     }
   },
   "appDir": "E:\\PROJECT\\openwa\\web",

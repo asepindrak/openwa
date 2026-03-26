@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
+
 function SessionStatusBadge({ status }) {
   const colors = {
     ready: "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/20",
@@ -26,6 +29,20 @@ function SessionAvatar({ label }) {
   return <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#2e2f2f] text-sm font-semibold text-white">{initials(label)}</div>;
 }
 
+function formatDateTime(value) {
+  if (!value) {
+    return "Never";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(new Date(value));
+}
+
 export function SettingsModal({
   open,
   sessions,
@@ -38,8 +55,17 @@ export function SettingsModal({
   sessionPhone,
   onSessionNameChange,
   onSessionPhoneChange,
-  onCreateSession
+  onCreateSession,
+  apiKeys,
+  apiKeysLoading,
+  apiKeyName,
+  apiKeySecret,
+  onApiKeyNameChange,
+  onCreateApiKey,
+  onRevokeApiKey
 }) {
+  const [copied, setCopied] = useState(false);
+
   if (!open) {
     return null;
   }
@@ -48,9 +74,14 @@ export function SettingsModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-6 py-8 backdrop-blur-sm">
       <div className="flex h-full max-h-[840px] w-full max-w-[1080px] flex-col overflow-hidden rounded-[32px] bg-[#161717] shadow-[0_40px_120px_rgba(0,0,0,0.5)]">
         <div className="flex items-center justify-between px-6 py-5">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.26em] text-white/35">Settings</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">WhatsApp Devices</h2>
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white p-2 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
+              <BrandLogo variant="square" alt="OpenWA" className="h-full w-full rounded-xl" />
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.26em] text-white/35">Settings</p>
+              <h2 className="mt-2 text-xl font-semibold text-white">OpenWA Devices</h2>
+            </div>
           </div>
           <button type="button" className="rounded-full bg-[#2e2f2f] px-4 py-2 text-sm text-white/70 transition hover:bg-[#3a3b3b] hover:text-white" onClick={onClose}>
             Close
@@ -115,7 +146,7 @@ export function SettingsModal({
             </div>
           </div>
 
-          <div className="flex min-h-0 flex-col px-6 py-5">
+          <div className="min-h-0 overflow-y-auto px-6 py-5">
             <div className="rounded-[28px] bg-[#161717] p-4">
               <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">Pairing QR</p>
               {sessions.find((session) => session.id === activeSessionId)?.qrCode ? (
@@ -128,7 +159,7 @@ export function SettingsModal({
                 </div>
               ) : (
                 <div className="mt-4 rounded-[24px] bg-[#2e2f2f] px-4 py-16 text-center text-sm leading-6 text-white/40">
-                  QR code pairing akan muncul di sini saat session sedang connect.
+                  QR code for pairing will appear here when session is connecting.
                 </div>
               )}
             </div>
@@ -138,7 +169,7 @@ export function SettingsModal({
                 <p className="mb-2 text-[11px] uppercase tracking-[0.24em] text-white/35">Add device</p>
                 <input
                   className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                  placeholder="Nama sesi, mis. Sales Team"
+                  placeholder="Session name, e.g. Sales Team"
                   value={sessionName}
                   onChange={(event) => onSessionNameChange(event.target.value)}
                   required
@@ -146,7 +177,7 @@ export function SettingsModal({
               </div>
               <input
                 className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                placeholder="Nomor WhatsApp (opsional)"
+                placeholder="WhatsApp number (optional)"
                 value={sessionPhone}
                 onChange={(event) => onSessionPhoneChange(event.target.value)}
               />
@@ -154,6 +185,79 @@ export function SettingsModal({
                 Add WhatsApp Session
               </button>
             </form>
+
+            <div className="mt-5 rounded-[28px] bg-[#161717] p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">API Access</p>
+                  <h3 className="mt-2 text-base font-semibold text-white">Generate API key</h3>
+                  <p className="mt-2 text-sm leading-6 text-white/45">Use with external agents via `X-API-Key` header or `Authorization: Bearer &lt;api-key&gt;`.</p>
+                </div>
+              </div>
+
+              {apiKeySecret ? (
+                <div className="mt-4 rounded-[22px] bg-[#2e2f2f] p-4">
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-emerald-200/80">Shown once</p>
+                  <p className="mt-2 break-all font-mono text-sm text-white">{apiKeySecret}</p>
+                  <button
+                    type="button"
+                    className="mt-3 rounded-full bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(apiKeySecret);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    }}
+                  >
+                    {copied ? "Copied" : "Copy API key"}
+                  </button>
+                </div>
+              ) : null}
+
+              <form className="mt-4 flex gap-2" onSubmit={onCreateApiKey}>
+                <input
+                  className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                  placeholder="Key name, e.g. OpenClaw Agent"
+                  value={apiKeyName}
+                  onChange={(event) => onApiKeyNameChange(event.target.value)}
+                  required
+                />
+                <button type="submit" className="shrink-0 rounded-[22px] bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]">
+                  Generate
+                </button>
+              </form>
+
+              <div className="mt-4 max-h-[260px] space-y-3 overflow-y-auto pr-1">
+                {apiKeysLoading ? <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm text-white/45">Loading API keys...</div> : null}
+
+                {!apiKeysLoading && !apiKeys.length ? (
+                  <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm leading-6 text-white/45">
+                    No API keys yet. Create one for OpenAPI client, AI agents, or external integrations.
+                  </div>
+                ) : null}
+
+                {apiKeys.map((apiKey) => (
+                  <div key={apiKey.id} className="rounded-[22px] bg-[#2e2f2f] px-4 py-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h4 className="truncate text-sm font-semibold text-white">{apiKey.name}</h4>
+                        <p className="mt-1 font-mono text-xs text-white/55">{apiKey.maskedKey}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-red-200 transition hover:bg-red-500/15"
+                        onClick={() => onRevokeApiKey(apiKey.id)}
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs text-white/40">
+                      <p>Created: {formatDateTime(apiKey.createdAt)}</p>
+                      <p>Last used: {formatDateTime(apiKey.lastUsedAt)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>

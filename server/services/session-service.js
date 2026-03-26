@@ -1,16 +1,24 @@
 const { prisma } = require("../database/client");
 
 async function retryOnSqliteTimeout(operation) {
-  try {
-    return await operation();
-  } catch (error) {
-    if (error?.code !== "P1008") {
-      throw error;
+  let lastError = null;
+  for (const delayMs of [0, 100, 250, 500]) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    return operation();
+    try {
+      return await operation();
+    } catch (error) {
+      if (error?.code !== "P1008") {
+        throw error;
+      }
+
+      lastError = error;
+    }
   }
+
+  throw lastError;
 }
 
 async function listUserSessions(userId) {

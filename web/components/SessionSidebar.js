@@ -1,3 +1,5 @@
+import { BrandLogo } from "@/components/BrandLogo";
+
 function SessionStatusBadge({ status }) {
   const colors = {
     ready: "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/20",
@@ -45,12 +47,12 @@ export function SessionSidebar({
       <div className="border-b border-white/6 px-5 py-5">
         <p className="text-[11px] uppercase tracking-[0.28em] text-brand-100/60">Workspace</p>
         <div className="mt-3 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-emerald-400 text-sm font-bold text-[#10251a]">
-            WA
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white p-2 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
+            <BrandLogo variant="square" alt="OpenWA" className="h-full w-full rounded-xl" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-white">WhatsApp Devices</h2>
-            <p className="text-sm text-white/45">Kelola banyak nomor dalam satu dashboard.</p>
+            <h2 className="text-lg font-semibold text-white">OpenWA Devices</h2>
+            <p className="text-sm text-white/45">Manage multiple numbers in one dashboard.</p>
           </div>
         </div>
       </div>
@@ -75,7 +77,7 @@ export function SessionSidebar({
                     <h3 className="truncate font-medium text-white">{session.name}</h3>
                     <SessionStatusBadge status={session.status} />
                   </div>
-                  <p className="mt-1 truncate text-sm text-white/45">{session.phoneNumber || "Nomor akan muncul setelah device connect"}</p>
+                  <p className="mt-1 truncate text-sm text-white/45">{session.phoneNumber || "Number will appear after device connects"}</p>
                 </div>
               </div>
             </button>
@@ -83,7 +85,7 @@ export function SessionSidebar({
 
           {sessions.length === 0 ? (
             <div className="rounded-[26px] border border-dashed border-white/10 bg-white/[0.03] px-4 py-7 text-sm leading-6 text-white/45">
-              Belum ada sesi aktif. Tambahkan device baru untuk mulai membuat workspace OpenWA Anda.
+              No active sessions. Add a new device to start building your OpenWA workspace.
             </div>
           ) : null}
         </div>
@@ -109,7 +111,7 @@ export function SessionSidebar({
               </div>
              ) : (
                <div className="rounded-[24px] border border-dashed border-white/10 bg-[#111b21] px-4 py-10 text-center text-sm leading-6 text-white/45">
-                 QR code akan muncul di sini saat session mulai pairing.
+                 QR code will appear here when session starts pairing.
                </div>
              )}
 
@@ -143,7 +145,7 @@ export function SessionSidebar({
             <p className="mb-2 text-[11px] uppercase tracking-[0.26em] text-white/35">Add device</p>
             <input
               className="w-full rounded-2xl border border-white/10 bg-[#202c33] px-4 py-3 text-sm text-white outline-none transition placeholder:text-white/30 focus:border-brand-500"
-              placeholder="Nama sesi, mis. Sales Team"
+              placeholder="Session name, e.g. Sales Team"
               value={sessionName}
               onChange={(event) => onSessionNameChange(event.target.value)}
               required

@@ -21,8 +21,29 @@ function writeToken(token) {
   window.localStorage.removeItem("openwa-token");
 }
 
+function recentChatTimestamp(chat) {
+  return chat?.contact?.lastMessageAt || chat?.lastMessage?.createdAt || null;
+}
+
 function sortChats(chats) {
-  return [...chats].sort((left, right) => new Date(right.updatedAt) - new Date(left.updatedAt));
+  return [...chats].sort((left, right) => {
+    const leftRecent = recentChatTimestamp(left);
+    const rightRecent = recentChatTimestamp(right);
+
+    if (leftRecent && rightRecent) {
+      return new Date(rightRecent) - new Date(leftRecent);
+    }
+
+    if (rightRecent) {
+      return 1;
+    }
+
+    if (leftRecent) {
+      return -1;
+    }
+
+    return new Date(right.updatedAt) - new Date(left.updatedAt);
+  });
 }
 
 export const useAppStore = create((set, get) => ({
@@ -60,11 +81,12 @@ export const useAppStore = create((set, get) => ({
     });
   },
   setBootstrapData: (payload) => {
+    const sortedChats = sortChats(payload.chats || []);
     set((state) => ({
       user: payload.user,
       sessions: payload.sessions || [],
-      chats: sortChats(payload.chats || []),
-      activeChatId: payload.activeChatId || payload.chats?.[0]?.id || null,
+      chats: sortedChats,
+      activeChatId: payload.activeChatId || sortedChats[0]?.id || null,
       activeSessionId: state.activeSessionId || null,
       messagesByChat: payload.activeChatId
         ? {

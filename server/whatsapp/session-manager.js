@@ -28,6 +28,8 @@ class SessionManager extends EventEmitter {
     this.adapters = new Map();
     this.retryTimers = new Map();
     this.manualDisconnects = new Set();
+    this.qrPersistTimers = new Map();
+    this.queuedQrStates = new Map();
   }
 
   async hydrate(sessions) {
@@ -41,6 +43,7 @@ class SessionManager extends EventEmitter {
     const { force = false } = options;
     this.manualDisconnects.delete(sessionId);
     this.clearRetry(sessionId);
+    this.clearQueuedQrPersist(sessionId);
 
     const existing = this.adapters.get(sessionId);
     if (existing) {
@@ -139,7 +142,7 @@ class SessionManager extends EventEmitter {
 
   attachAdapter({ session, adapter, transportType }) {
     adapter.on("qr", safeAsyncListener(async (payload) => {
-      await sessionService.touchSessionState(session.id, {
+      this.queueQrStatePersist(session.id, {
         status: "connecting",
         qrCode: payload.qrCode,
         transportType: payload.transportType || transportType
@@ -162,6 +165,10 @@ class SessionManager extends EventEmitter {
 
       if (payload.status === "ready") {
         this.clearRetry(session.id);
+      }
+
+      if (payload.status === "ready" || payload.status === "disconnected" || payload.status === "error") {
+        this.clearQueuedQrPersist(session.id);
       }
 
       await sessionService.touchSessionState(session.id, {
@@ -236,6 +243,7 @@ class SessionManager extends EventEmitter {
   async disconnectSession(userId, sessionId) {
     this.manualDisconnects.add(sessionId);
     this.clearRetry(sessionId);
+    this.clearQueuedQrPersist(sessionId);
     const session = await sessionService.getSessionById(userId, sessionId);
     if (!session) {
       throw new Error("Session not found.");
@@ -305,6 +313,43 @@ class SessionManager extends EventEmitter {
       clearTimeout(timer);
       this.retryTimers.delete(sessionId);
     }
+  }
+
+  queueQrStatePersist(sessionId, data) {
+    this.queuedQrStates.set(sessionId, {
+      ...(this.queuedQrStates.get(sessionId) || {}),
+      ...data
+    });
+
+    if (this.qrPersistTimers.has(sessionId)) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const pendingState = this.queuedQrStates.get(sessionId);
+      this.qrPersistTimers.delete(sessionId);
+      this.queuedQrStates.delete(sessionId);
+
+      if (!pendingState) {
+        return;
+      }
+
+      sessionService.touchSessionState(sessionId, pendingState).catch((error) => {
+        console.error(`Failed to persist queued QR state for session ${sessionId}.`, error);
+      });
+    }, 400);
+
+    this.qrPersistTimers.set(sessionId, timer);
+  }
+
+  clearQueuedQrPersist(sessionId) {
+    const timer = this.qrPersistTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this.qrPersistTimers.delete(sessionId);
+    }
+
+    this.queuedQrStates.delete(sessionId);
   }
 }
 

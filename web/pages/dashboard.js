@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
+import { AppHead } from "@/components/AppHead";
 import { ChatWindow } from "@/components/ChatWindow";
 import { ContactList } from "@/components/ContactList";
 import { ContactsPanel } from "@/components/ContactsPanel";
@@ -45,10 +46,15 @@ export default function DashboardPage() {
   const [contactQuery, setContactQuery] = useState("");
   const [messageQuery, setMessageQuery] = useState("");
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const [contacts, setContacts] = useState([]);
+  const [apiKeys, setApiKeys] = useState([]);
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [apiKeyName, setApiKeyName] = useState("");
+  const [apiKeySecret, setApiKeySecret] = useState("");
   const [startingContactId, setStartingContactId] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [contactsPanelOpen, setContactsPanelOpen] = useState(true);
+  const [contactsPanelOpen, setContactsPanelOpen] = useState(false);
   const chatWindowRef = useRef(null);
 
   const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId) || null, [activeChatId, chats]);
@@ -70,6 +76,22 @@ export default function DashboardPage() {
       setError(requestError.message);
     } finally {
       setContactsLoading(false);
+    }
+  }, [token]);
+
+  const loadApiKeys = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+
+    setApiKeysLoading(true);
+    try {
+      const data = await apiFetch("/api/api-keys", { token });
+      setApiKeys(data.apiKeys || []);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setApiKeysLoading(false);
     }
   }, [token]);
 
@@ -108,10 +130,10 @@ export default function DashboardPage() {
       return;
     }
 
-    Promise.all([loadWorkspace(true), loadContacts()]).finally(() => {
+    Promise.all([loadWorkspace(true), loadContacts(), loadApiKeys()]).finally(() => {
       setLoading(false);
     });
-  }, [loadContacts, loadWorkspace, router, token]);
+  }, [loadApiKeys, loadContacts, loadWorkspace, router, token]);
 
   useEffect(() => {
     if (!activeSessionId && sessions[0]?.id) {
@@ -160,10 +182,21 @@ export default function DashboardPage() {
   }, [addMessage, loadContacts, loadWorkspace, setSocket, token, updateMessageStatus, upsertChat, upsertSession]);
 
   useEffect(() => {
-    if (!token || !activeChatId || messagesByChat[activeChatId]) {
+    if (!activeChatId) {
+      setMessagesLoading(false);
       return;
     }
 
+    if (messagesByChat[activeChatId]) {
+      setMessagesLoading(false);
+      return;
+    }
+
+    if (!token) {
+      return;
+    }
+
+    setMessagesLoading(true);
     apiFetch(`/api/chats/${activeChatId}/messages`, { token })
       .then((data) => {
         setMessages(activeChatId, data.messages, {
@@ -173,6 +206,9 @@ export default function DashboardPage() {
       })
       .catch((requestError) => {
         setError(requestError.message);
+      })
+      .finally(() => {
+        setMessagesLoading(false);
       });
   }, [activeChatId, messagesByChat, setMessages, token]);
 
@@ -225,6 +261,43 @@ export default function DashboardPage() {
       });
 
       upsertSession(data.session);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
+  const handleCreateApiKey = async (event) => {
+    event.preventDefault();
+    setError("");
+
+    try {
+      const result = await apiFetch("/api/api-keys", {
+        method: "POST",
+        token,
+        body: {
+          name: apiKeyName
+        }
+      });
+
+      setApiKeySecret(result.secret);
+      setApiKeyName("");
+      setApiKeys((current) => [result.apiKey, ...current]);
+      setSettingsOpen(true);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
+  const handleRevokeApiKey = async (apiKeyId) => {
+    setError("");
+
+    try {
+      await apiFetch(`/api/api-keys/${apiKeyId}`, {
+        method: "DELETE",
+        token
+      });
+
+      setApiKeys((current) => current.filter((item) => item.id !== apiKeyId));
     } catch (requestError) {
       setError(requestError.message);
     }
@@ -380,6 +453,11 @@ export default function DashboardPage() {
 
   return (
     <>
+      <AppHead
+        title="Dashboard"
+        description="Dashboard OpenWA untuk mengelola percakapan, kontak, device, dan session WhatsApp."
+      />
+
       <main className="h-screen overflow-hidden bg-[#161717] text-white">
         <div className="flex h-full w-full overflow-hidden bg-[#161717]">
           <ContactList
@@ -403,6 +481,7 @@ export default function DashboardPage() {
                 chats={chats}
                 typingState={activeTyping}
                 loading={loading}
+                messagesLoading={messagesLoading}
                 loadingOlder={loadingOlder}
                 hasMoreMessages={activeMeta.hasMore}
                 messageQuery={messageQuery}
@@ -449,6 +528,13 @@ export default function DashboardPage() {
         onSessionNameChange={setSessionName}
         onSessionPhoneChange={setSessionPhone}
         onCreateSession={handleCreateSession}
+        apiKeys={apiKeys}
+        apiKeysLoading={apiKeysLoading}
+        apiKeyName={apiKeyName}
+        apiKeySecret={apiKeySecret}
+        onApiKeyNameChange={setApiKeyName}
+        onCreateApiKey={handleCreateApiKey}
+        onRevokeApiKey={handleRevokeApiKey}
       />
     </>
   );

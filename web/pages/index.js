@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/router";
+import { AppHead } from "@/components/AppHead";
 import { AuthCard } from "@/components/AuthCard";
 import { apiFetch } from "@/lib/api";
 import { useAppStore } from "@/store/useAppStore";
@@ -41,14 +42,21 @@ export default function HomePage() {
   };
 
   return (
-    <main className="min-h-screen bg-[linear-gradient(180deg,#0b141a_0%,#111b21_100%)] px-6 py-8">
-      <AuthCard
-        mode={mode}
-        error={error}
-        busy={submitting}
-        onModeChange={setMode}
-        onSubmit={handleSubmit}
+    <>
+      <AppHead
+        title={mode === "login" ? "Login" : "Register"}
+        description="Sign in or register for your OpenWA workspace to manage sessions and chats from one dashboard."
       />
-    </main>
+
+      <main className="min-h-screen bg-[linear-gradient(180deg,#0b141a_0%,#111b21_100%)] px-6 py-8">
+        <AuthCard
+          mode={mode}
+          error={error}
+          busy={submitting}
+          onModeChange={setMode}
+          onSubmit={handleSubmit}
+        />
+      </main>
+    </>
   );
 }

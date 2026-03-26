@@ -56,8 +56,8 @@ export function ContactsPanel({ contacts, loading, open, query, onQueryChange, o
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-3">
-          {loading ? <p className="px-3 py-4 text-sm text-white/45">Memuat contacts...</p> : null}
-          {!loading && filteredContacts.length === 0 ? <p className="px-3 py-4 text-sm leading-6 text-white/40">Belum ada contact tersinkron. Hubungkan device dan tunggu sinkronisasi WhatsApp selesai.</p> : null}
+          {loading ? <p className="px-3 py-4 text-sm text-white/45">Loading contacts...</p> : null}
+          {!loading && filteredContacts.length === 0 ? <p className="px-3 py-4 text-sm leading-6 text-white/40">No synced contacts yet. Connect your device and wait for WhatsApp sync to complete.</p> : null}
 
           <div className="space-y-2">
             {filteredContacts.map((contact) => (

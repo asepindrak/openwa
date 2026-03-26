@@ -101,6 +101,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
   chats,
   typingState,
   loading,
+  messagesLoading,
   loadingOlder,
   hasMoreMessages,
   messageQuery,
@@ -122,20 +123,35 @@ export const ChatWindow = forwardRef(function ChatWindow({
   const [forwardingMessageId, setForwardingMessageId] = useState(null);
   const [forwardTargetChatId, setForwardTargetChatId] = useState("");
   const [searchOpen, setSearchOpen] = useState(Boolean(messageQuery));
+  const [searchResultIndex, setSearchResultIndex] = useState(0);
   const composerRef = useRef(null);
   const searchInputRef = useRef(null);
+  const messagesViewportRef = useRef(null);
+  const messagesEndRef = useRef(null);
+  const pendingOpenChatScrollRef = useRef(false);
+  const previousMessagesCountRef = useRef(0);
 
-  const filteredMessages = useMemo(() => {
+  const searchResults = useMemo(() => {
     const query = String(messageQuery || "").trim().toLowerCase();
     if (!query) {
-      return messages;
+      return [];
     }
 
-    return messages.filter((message) =>
-      [message.body, message.sender, message.replyTo?.body, message.mediaFile?.originalName]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(query))
-    );
+    return messages
+      .map((message, index) => {
+        const matches = [message.body, message.sender, message.replyTo?.body, message.mediaFile?.originalName]
+          .filter(Boolean)
+          .some((value) => value.toLowerCase().includes(query));
+        return matches ? index : -1;
+      })
+      .filter((index) => index !== -1);
+  }, [messageQuery, messages]);
+
+  const filteredMessages = useMemo(() => {
+    if (!messageQuery) {
+      return messages;
+    }
+    return messages;
   }, [messageQuery, messages]);
 
   const forwardTargets = chats.filter((item) => item.id !== chat?.id);
@@ -189,6 +205,36 @@ export const ChatWindow = forwardRef(function ChatWindow({
     setForwardTargetChatId("");
   };
 
+  const handleSearchNext = () => {
+    if (searchResults.length === 0) return;
+    const nextIndex = (searchResultIndex + 1) % searchResults.length;
+    setSearchResultIndex(nextIndex);
+    scrollToSearchResult(nextIndex);
+  };
+
+  const handleSearchPrev = () => {
+    if (searchResults.length === 0) return;
+    const prevIndex = (searchResultIndex - 1 + searchResults.length) % searchResults.length;
+    setSearchResultIndex(prevIndex);
+    scrollToSearchResult(prevIndex);
+  };
+
+  const scrollToSearchResult = (resultIndex) => {
+    if (searchResults.length === 0) return;
+    const messageIndex = searchResults[resultIndex];
+    const messageElement = document.querySelector(`[data-message-id="${messages[messageIndex]?.id}"]`);
+    if (messageElement && messagesViewportRef.current) {
+      messagesViewportRef.current.scrollTop = messageElement.offsetTop - messagesViewportRef.current.offsetTop;
+    }
+  };
+
+  useEffect(() => {
+    if (messageQuery && searchResults.length > 0) {
+      setSearchResultIndex(0);
+      scrollToSearchResult(0);
+    }
+  }, [messageQuery]);
+
   useImperativeHandle(ref, () => ({
     focusComposer() {
       composerRef.current?.focus();
@@ -211,16 +257,68 @@ export const ChatWindow = forwardRef(function ChatWindow({
     }
   }, [searchOpen]);
 
+  useEffect(() => {
+    pendingOpenChatScrollRef.current = true;
+  }, [chat?.id]);
+
+  useEffect(() => {
+    if (!chat?.id || !pendingOpenChatScrollRef.current) {
+      return;
+    }
+
+    const scrollToBottom = () => {
+      if (messagesViewportRef.current) {
+        messagesViewportRef.current.scrollTo({
+          top: messagesViewportRef.current.scrollHeight,
+          behavior: "smooth"
+        });
+      }
+      pendingOpenChatScrollRef.current = false;
+    };
+
+    if (!messages.length) {
+      if (messagesViewportRef.current) {
+        messagesViewportRef.current.scrollTo({
+          top: messagesViewportRef.current.scrollHeight,
+          behavior: "smooth"
+        });
+      }
+      pendingOpenChatScrollRef.current = false;
+      return;
+    }
+
+    // Detect if this is initial load (message count increased significantly)
+    const isInitialLoad = previousMessagesCountRef.current === 0 && messages.length > 0;
+    previousMessagesCountRef.current = messages.length;
+    
+    // Use longer delay for initial load since DOM needs more time to render many messages
+    const delay = isInitialLoad ? 300 : 100;
+
+    // Wait for DOM to render all messages before scrolling
+    // Use multiple frames and a timeout to ensure layout is complete
+    const timeoutId = setTimeout(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollToBottom();
+          });
+        });
+      });
+    }, delay);
+
+    return () => clearTimeout(timeoutId);
+  }, [chat?.id, messages.length, messagesLoading]);
+
   if (loading) {
-    return <div className="flex flex-1 items-center justify-center text-white/50">Memuat dashboard...</div>;
+    return <div className="flex flex-1 items-center justify-center text-white/50">Loading dashboard...</div>;
   }
 
   if (!chat) {
     return (
       <div className="flex flex-1 items-center justify-center bg-[#161717] px-8 text-center text-white/50">
         <div>
-          <p className="text-lg font-medium text-white">Belum ada chat yang dibuka</p>
-          <p className="mt-3 max-w-md text-sm leading-7 text-white/45">Mulai percakapan baru dari contact composer agar flow-nya terasa seperti WhatsApp Web.</p>
+          <p className="text-lg font-medium text-white">No chat selected</p>
+          <p className="mt-3 max-w-md text-sm leading-7 text-white/45">Start a new conversation from the contact selector to begin chatting.</p>
           <button type="button" className="mt-5 rounded-full bg-brand-500 px-5 py-3 text-sm font-semibold text-[#10251a]" onClick={onOpenContacts}>
             New chat
           </button>
@@ -236,7 +334,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
           <ChatAvatar src={chat.contact.avatarUrl} label={chat.contact.displayName} />
           <div className="min-w-0">
             <h2 className="truncate font-semibold text-white">{chat.contact.displayName}</h2>
-            <p className="text-sm text-white/40">{typingState?.isTyping ? `${typingState.name} sedang mengetik...` : "WhatsApp chat synced locally"}</p>
+            <p className="text-sm text-white/40">{typingState?.isTyping ? `${typingState.name} is typing...` : "WhatsApp chat synced locally"}</p>
           </div>
         </div>
 
@@ -245,11 +343,38 @@ export const ChatWindow = forwardRef(function ChatWindow({
             <div className="flex items-center gap-2 rounded-[22px] bg-[#2e2f2f] px-4 py-2">
               <input
                 ref={searchInputRef}
-                className="w-[220px] border-none bg-transparent text-sm text-white outline-none placeholder:text-white/30"
-                placeholder="Cari pesan..."
+                className="w-[180px] border-none bg-transparent text-sm text-white outline-none placeholder:text-white/30"
+                placeholder="Search messages..."
                 value={messageQuery}
                 onChange={(event) => onMessageQueryChange(event.target.value)}
               />
+              {searchResults.length > 0 && (
+                <span className="text-xs text-white/60">
+                  {searchResultIndex + 1}/{searchResults.length}
+                </span>
+              )}
+              {searchResults.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    title="Previous result"
+                    aria-label="Previous result"
+                    className="text-sm leading-none text-white/55 transition hover:text-white"
+                    onClick={handleSearchPrev}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    title="Next result"
+                    aria-label="Next result"
+                    className="text-sm leading-none text-white/55 transition hover:text-white"
+                    onClick={handleSearchNext}
+                  >
+                    ↓
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 title="Close search"
@@ -271,7 +396,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto bg-[#161717] px-8 py-5">
+      <div ref={messagesViewportRef} className="flex-1 overflow-y-auto bg-[#161717] px-8 py-5">
         <div className="mb-5 flex justify-center">
           <button
             type="button"
@@ -279,17 +404,34 @@ export const ChatWindow = forwardRef(function ChatWindow({
             onClick={onLoadOlder}
             disabled={!hasMoreMessages || loadingOlder}
           >
-            {loadingOlder ? "Memuat..." : hasMoreMessages ? "Load older messages" : "Semua pesan sudah dimuat"}
+            {loadingOlder ? "Loading..." : hasMoreMessages ? "Load older messages" : "All messages loaded"}
           </button>
         </div>
 
+        {messagesLoading ? (
+          <div className="mb-4 flex items-center justify-center">
+            <div className="rounded-full bg-[#2e2f2f] px-4 py-2 text-xs font-medium text-white/65">
+              Loading messages...
+            </div>
+          </div>
+        ) : null}
+
         <div className="space-y-3">
-          {filteredMessages.map((message) => {
+          {messages.map((message) => {
             const outbound = message.direction === "outbound";
+            const messageIndexInAll = messages.indexOf(message);
+            const isSearchResult = messageQuery && searchResults.includes(messageIndexInAll);
+            const isCurrentSearchResult = isSearchResult && searchResults[searchResultIndex] === messageIndexInAll;
 
             return (
-              <div key={message.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[72%] rounded-[18px] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)] ${outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]"}`}>
+              <div key={message.id} data-message-id={message.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
+                <div className={`max-w-[72%] rounded-[18px] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-colors ${
+                  isCurrentSearchResult 
+                    ? "ring-2 ring-brand-500 " + (outbound ? "bg-[#1a5f41]" : "bg-[#3a4a4a]")
+                    : isSearchResult 
+                    ? "ring-1 ring-brand-500/50 " + (outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]")
+                    : outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]"
+                }`}>
                   {message.replyTo ? (
                     <div className="mb-2 rounded-2xl border-l-4 border-brand-500 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
                       <span className="font-semibold text-white">{message.replyTo.direction === "outbound" ? "Anda" : chat.contact.displayName}</span>
@@ -330,20 +472,21 @@ export const ChatWindow = forwardRef(function ChatWindow({
                         value={forwardTargetChatId}
                         onChange={(event) => setForwardTargetChatId(event.target.value)}
                       >
-                        <option value="">Pilih chat tujuan</option>
+                        <option value="">Select target chat</option>
                         {forwardTargets.map((target) => (
                           <option key={target.id} value={target.id}>
                             {target.contact.displayName}
                           </option>
                         ))}
                       </select>
-                      <button type="button" className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]" onClick={() => handleForward(message.id)}>Kirim</button>
+                      <button type="button" className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]" onClick={() => handleForward(message.id)}>Send</button>
                     </div>
                   ) : null}
                 </div>
               </div>
             );
           })}
+          <div ref={messagesEndRef} />
         </div>
       </div>
 

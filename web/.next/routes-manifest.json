@@ -15,7 +15,33 @@
   "headers": [],
   "rewrites": {
     "beforeFiles": [],
-    "afterFiles": [],
+    "afterFiles": [
+      {
+        "source": "/docs",
+        "destination": "http://localhost:55222/docs",
+        "regex": "^/docs(?:/)?$"
+      },
+      {
+        "source": "/docs/json",
+        "destination": "http://localhost:55222/docs/json",
+        "regex": "^/docs/json(?:/)?$"
+      },
+      {
+        "source": "/docs/:path*",
+        "destination": "http://localhost:55222/docs/:path*",
+        "regex": "^/docs(?:/((?:[^/]+?)(?:/(?:[^/]+?))*))?(?:/)?$"
+      },
+      {
+        "source": "/health",
+        "destination": "http://localhost:55222/health",
+        "regex": "^/health(?:/)?$"
+      },
+      {
+        "source": "/version",
+        "destination": "http://localhost:55222/version",
+        "regex": "^/version(?:/)?$"
+      }
+    ],
     "fallback": []
   },
   "dynamicRoutes": [],

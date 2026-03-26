@@ -2,9 +2,11 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const crypto = require("crypto");
-const { authMiddleware, loginUser, registerUser } = require("../services/auth-service");
+const { authMiddleware, dashboardAuthMiddleware, isSqliteTimeoutError, loginUser, registerUser } = require("../services/auth-service");
+const apiKeyService = require("../services/api-key-service");
 const chatService = require("../services/chat-service");
 const sessionService = require("../services/session-service");
+const { createAgentReadme, createOpenApiDocument, createSwaggerHtml, packageName, packageVersion } = require("./openapi");
 const { mediaDir } = require("../utils/paths");
 
 function inferMessageType(file) {
@@ -41,15 +43,29 @@ function createUploader() {
   return multer({ storage });
 }
 
+function withAsync(handler, statusCode = 500) {
+  return async (req, res) => {
+    try {
+      await handler(req, res);
+    } catch (error) {
+      res.status(error?.code === "P1008" ? 503 : statusCode).json({
+        error: error?.code === "P1008" ? "Database is busy. Please try again." : error.message
+      });
+    }
+  };
+}
+
 function createApp({ config, sessionManager }) {
   const app = express();
   const upload = createUploader();
   const requireAuth = authMiddleware(config);
+  const requireDashboardAuth = dashboardAuthMiddleware(config);
+  const openApiDocument = createOpenApiDocument(config);
 
   app.use((req, res, next) => {
     res.header("Access-Control-Allow-Origin", config.frontendUrl);
     res.header("Access-Control-Allow-Credentials", "true");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-OpenWA-API-Key");
     res.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
 
     if (req.method === "OPTIONS") {
@@ -63,8 +79,39 @@ function createApp({ config, sessionManager }) {
   app.use(express.urlencoded({ extended: true }));
   app.use("/media", express.static(mediaDir));
 
+  app.get("/docs", (req, res) => {
+    res.type("html").send(createSwaggerHtml());
+  });
+
+  app.get("/docs/json", (req, res) => {
+    res.json(openApiDocument);
+  });
+
+  app.get("/docs/readme", (req, res) => {
+    res.type("text/markdown").send(createAgentReadme(config));
+  });
+
+  app.get("/health", (req, res) => {
+    res.json({
+      ok: true,
+      service: packageName,
+      version: packageVersion
+    });
+  });
+
+  app.get("/version", (req, res) => {
+    res.json({
+      name: packageName,
+      version: packageVersion
+    });
+  });
+
   app.get("/api/health", async (req, res) => {
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      service: packageName,
+      version: packageVersion
+    });
   });
 
   app.post("/api/auth/register", async (req, res) => {
@@ -78,7 +125,9 @@ function createApp({ config, sessionManager }) {
 
       res.status(201).json(result);
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      res.status(isSqliteTimeoutError(error) ? 503 : 400).json({
+        error: isSqliteTimeoutError(error) ? "Database is busy. Please try again." : error.message
+      });
     }
   });
 
@@ -93,36 +142,67 @@ function createApp({ config, sessionManager }) {
 
       res.json(result);
     } catch (error) {
+      res.status(isSqliteTimeoutError(error) ? 503 : 400).json({
+        error: isSqliteTimeoutError(error) ? "Database is busy. Please try again." : error.message
+      });
+    }
+  });
+
+  app.get("/api/auth/me", requireAuth, withAsync(async (req, res) => {
+    res.json({ user: req.user });
+  }));
+
+  app.get("/api/api-keys", requireDashboardAuth, withAsync(async (req, res) => {
+    const apiKeys = await apiKeyService.listApiKeys(req.user.id);
+    res.json({ apiKeys });
+  }));
+
+  app.post("/api/api-keys", requireDashboardAuth, async (req, res) => {
+    try {
+      const result = await apiKeyService.createApiKey(req.user.id, req.body);
+      res.status(201).json(result);
+    } catch (error) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.get("/api/auth/me", requireAuth, async (req, res) => {
-    res.json({ user: req.user });
+  app.delete("/api/api-keys/:apiKeyId", requireDashboardAuth, async (req, res) => {
+    try {
+      const result = await apiKeyService.revokeApiKey(req.user.id, req.params.apiKeyId);
+      res.json(result);
+    } catch (error) {
+      res.status(404).json({ error: error.message });
+    }
   });
 
   app.get("/api/bootstrap", requireAuth, async (req, res) => {
-    await chatService.ensureWelcomeWorkspace(req.user.id);
-    const sessions = await sessionService.listUserSessions(req.user.id);
-    const chats = await chatService.listChats(req.user.id);
-    const activeChatId = chats[0]?.id || null;
-    const messageResult = activeChatId ? await chatService.listMessages(req.user.id, activeChatId) : { messages: [], hasMore: false, nextBefore: null };
+    try {
+      await chatService.ensureWelcomeWorkspace(req.user.id);
+      const sessions = await sessionService.listUserSessions(req.user.id);
+      const chats = await chatService.listChats(req.user.id);
+      const activeChatId = chats[0]?.id || null;
+      const messageResult = activeChatId ? await chatService.listMessages(req.user.id, activeChatId) : { messages: [], hasMore: false, nextBefore: null };
 
-    res.json({
-      user: req.user,
-      sessions,
-      chats,
-      activeChatId,
-      messages: messageResult.messages,
-      hasMoreMessages: messageResult.hasMore,
-      nextBefore: messageResult.nextBefore
-    });
+      res.json({
+        user: req.user,
+        sessions,
+        chats,
+        activeChatId,
+        messages: messageResult.messages,
+        hasMoreMessages: messageResult.hasMore,
+        nextBefore: messageResult.nextBefore
+      });
+    } catch (error) {
+      res.status(error?.code === "P1008" ? 503 : 500).json({
+        error: error?.code === "P1008" ? "Database is busy. Please try again." : error.message
+      });
+    }
   });
 
-  app.get("/api/sessions", requireAuth, async (req, res) => {
+  app.get("/api/sessions", requireAuth, withAsync(async (req, res) => {
     const sessions = await sessionService.listUserSessions(req.user.id);
     res.json({ sessions });
-  });
+  }));
 
   app.post("/api/sessions", requireAuth, async (req, res) => {
     try {
@@ -154,22 +234,24 @@ function createApp({ config, sessionManager }) {
     }
   });
 
-  app.get("/api/chats", requireAuth, async (req, res) => {
+  app.get("/api/chats", requireAuth, withAsync(async (req, res) => {
     const chats = await chatService.listChats(req.user.id, req.query.sessionId || undefined, req.query.q || "");
     res.json({ chats });
-  });
+  }));
 
-  app.get("/api/contacts", requireAuth, async (req, res) => {
+  app.get("/api/contacts", requireAuth, withAsync(async (req, res) => {
     const contacts = await chatService.listContacts(req.user.id, req.query.sessionId || undefined, req.query.q || "");
     res.json({ contacts });
-  });
+  }));
 
   app.post("/api/contacts/:contactId/open", requireAuth, async (req, res) => {
     try {
       const chat = await chatService.openChatForContact(req.user.id, req.params.contactId);
       res.json({ chat });
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      res.status(error?.code === "P1008" ? 503 : 400).json({
+        error: error?.code === "P1008" ? "Database is busy. Please try again." : error.message
+      });
     }
   });
 
@@ -182,7 +264,38 @@ function createApp({ config, sessionManager }) {
       });
       res.json(result);
     } catch (error) {
-      res.status(404).json({ error: error.message });
+      res.status(error?.code === "P1008" ? 503 : 404).json({
+        error: error?.code === "P1008" ? "Database is busy. Please try again." : error.message
+      });
+    }
+  });
+
+  app.post("/api/chats/:chatId/messages/send", requireAuth, async (req, res) => {
+    try {
+      const result = await chatService.createOutgoingMessage({
+        userId: req.user.id,
+        chatId: req.params.chatId,
+        body: req.body.body,
+        type: req.body.type || "text",
+        mediaFileId: req.body.mediaFileId || null,
+        replyToId: req.body.replyToId || null
+      });
+
+      if (result.message.sessionId) {
+        await sessionManager.sendMessage(result.message.sessionId, {
+          recipient: result.message.receiver,
+          body: result.message.body,
+          mediaFileId: result.message.mediaFileId,
+          mediaPath: result.message.mediaFile?.relativePath || null
+        });
+
+        await chatService.addMessageStatus(result.message.id, "delivered");
+        result.message.statuses = [...(result.message.statuses || []), { status: "delivered", createdAt: new Date().toISOString() }];
+      }
+
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error.message });
     }
   });
 

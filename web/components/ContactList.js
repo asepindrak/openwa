@@ -1,9 +1,11 @@
+import { BrandLogo } from "@/components/BrandLogo";
+
 function formatTime(value) {
   if (!value) {
     return "";
   }
 
-  return new Intl.DateTimeFormat("id-ID", {
+  return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(value));
@@ -38,13 +40,9 @@ export function ContactList({ chats, activeChatId, onSelectChat, currentUser, lo
   return (
     <aside className="flex h-full w-[360px] shrink-0 flex-col bg-[#161717]">
       <div className="px-5 py-5">
-        <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-500 text-sm font-bold text-[#10251a]">
-            {initials(currentUser?.name)}
-          </div>
-          <div className="min-w-0">
-            <h2 className="truncate font-semibold text-white">{currentUser?.name || "OpenWA User"}</h2>
-            <p className="text-sm text-white/40">All conversations</p>
+        <div className="flex items-center justify-center">
+          <div className="h-12 flex items-center">
+            <BrandLogo variant="long" alt="OpenWA" className="h-full" />
           </div>
         </div>
 
@@ -59,8 +57,8 @@ export function ContactList({ chats, activeChatId, onSelectChat, currentUser, lo
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {loading ? <p className="px-3 py-4 text-sm text-white/45">Memuat percakapan...</p> : null}
-        {!loading && filteredChats.length === 0 ? <p className="px-3 py-4 text-sm leading-6 text-white/40">Belum ada percakapan tersinkron. Connect device untuk memuat semua chat terbaru.</p> : null}
+        {loading ? <p className="px-3 py-4 text-sm text-white/45">Loading conversations...</p> : null}
+        {!loading && filteredChats.length === 0 ? <p className="px-3 py-4 text-sm leading-6 text-white/40">No synced conversations yet. Connect your device to load chats.</p> : null}
 
         <div className="space-y-2">
           {filteredChats.map((chat) => (
@@ -81,7 +79,7 @@ export function ContactList({ chats, activeChatId, onSelectChat, currentUser, lo
                   <span className="shrink-0 text-[11px] text-white/35">{formatTime(chat.contact.lastMessageAt || chat.updatedAt)}</span>
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="truncate text-sm text-white/42">{chat.contact.lastMessagePreview || "Belum ada pesan"}</p>
+                  <p className="truncate text-sm text-white/42">{chat.contact.lastMessagePreview || "No messages yet"}</p>
                   {chat.contact.unreadCount ? (
                     <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-500 px-1.5 text-[11px] font-bold text-[#10251a]">
                       {chat.contact.unreadCount}

@@ -1,3 +1,6 @@
-2026/03/26-15:26:20.343 5270 Reusing MANIFEST E:\PROJECT\openwa\storage\sessions\session-cmn74jo74000nv708aql2uf1q\Default\Local Storage\leveldb/MANIFEST-000001
-2026/03/26-15:26:20.408 5270 Recovering log #4
-2026/03/26-15:26:20.425 5270 Reusing old log E:\PROJECT\openwa\storage\sessions\session-cmn74jo74000nv708aql2uf1q\Default\Local Storage\leveldb/000004.log 
+2026/03/27-01:20:40.585 5318 Reusing MANIFEST E:\PROJECT\openwa\storage\sessions\session-cmn74jo74000nv708aql2uf1q\Default\Local Storage\leveldb/MANIFEST-000001
+2026/03/27-01:20:40.600 5318 Recovering log #13
+2026/03/27-01:20:40.602 5318 Reusing old log E:\PROJECT\openwa\storage\sessions\session-cmn74jo74000nv708aql2uf1q\Default\Local Storage\leveldb/000013.log 
+2026/03/27-01:22:40.923 6300 Level-0 table #17: started
+2026/03/27-01:22:41.039 6300 Level-0 table #17: 17008 bytes OK
+2026/03/27-01:22:41.136 6300 Delete type=0 #13
