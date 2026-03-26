@@ -1,0 +1,9 @@
+node_modules
+web\.next
+storage\database\openwa.db
+storage\database\openwa.db-journal
+storage\database\openwa.db-shm
+storage\database\openwa.db-wal
+storage\sessions
+storage\media
+.env

@@ -1,0 +1,6 @@
+2026/03/26-15:26:21.305 26f4 Reusing MANIFEST E:\PROJECT\openwa\storage\sessions\session-cmn74jo74000nv708aql2uf1q\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/03/26-15:26:21.306 26f4 Recovering log #582
+2026/03/26-15:26:21.357 26f4 Reusing old log E:\PROJECT\openwa\storage\sessions\session-cmn74jo74000nv708aql2uf1q\Default\IndexedDB\https_web.whatsapp.com_0.indexeddb.leveldb/000582.log 
+2026/03/26-15:28:22.008 4ca8 Level-0 table #607: started
+2026/03/26-15:28:22.309 4ca8 Level-0 table #607: 1164618 bytes OK
+2026/03/26-15:28:22.435 4ca8 Delete type=0 #582
