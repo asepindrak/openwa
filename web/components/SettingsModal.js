@@ -3,7 +3,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 
 function SessionStatusBadge({ status }) {
   const colors = {
-    ready: "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/20",
+    ready: "bg-brand-500/15 text-brand-100 ring-1 ring-brand-400/20",
     connecting: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-400/20",
     disconnected: "bg-white/8 text-white/60 ring-1 ring-white/10",
     error: "bg-red-500/15 text-red-100 ring-1 ring-red-400/20"
@@ -197,7 +197,7 @@ export function SettingsModal({
 
               {apiKeySecret ? (
                 <div className="mt-4 rounded-[22px] bg-[#2e2f2f] p-4">
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-emerald-200/80">Shown once</p>
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-brand-200/80">Shown once</p>
                   <p className="mt-2 break-all font-mono text-sm text-white">{apiKeySecret}</p>
                   <button
                     type="button"

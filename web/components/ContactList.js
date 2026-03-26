@@ -1,4 +1,5 @@
 import { BrandLogo } from "@/components/BrandLogo";
+import { ConversationsSkeletonList } from "@/components/Skeletons";
 
 function formatTime(value) {
   if (!value) {
@@ -57,7 +58,7 @@ export function ContactList({ chats, activeChatId, onSelectChat, currentUser, lo
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
-        {loading ? <p className="px-3 py-4 text-sm text-white/45">Loading conversations...</p> : null}
+        {loading ? <ConversationsSkeletonList /> : null}
         {!loading && filteredChats.length === 0 ? <p className="px-3 py-4 text-sm leading-6 text-white/40">No synced conversations yet. Connect your device to load chats.</p> : null}
 
         <div className="space-y-2">

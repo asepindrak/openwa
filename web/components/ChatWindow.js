@@ -1,5 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { getApiBaseUrl } from "@/lib/api";
+import { MessageActionMenu } from "./MessageActionMenu";
+import { MediaPreviewModal } from "./MediaPreviewModal";
+import { EmojiPicker } from "./EmojiPicker";
 
 function formatTime(value) {
   if (!value) {
@@ -95,6 +98,138 @@ function renderMediaPreview(message) {
   );
 }
 
+function isImageFile(mimeType) {
+  return mimeType && mimeType.startsWith("image/") && mimeType !== "image/webp";
+}
+
+function groupConsecutiveImages(messages) {
+  const groups = [];
+  let currentGroup = null;
+  const TWO_MINUTES = 2 * 60 * 1000;
+
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
+    const mimeType = String(message.mediaFile?.mimeType || "");
+    const isImage = message.mediaFile && isImageFile(mimeType);
+
+    if (isImage && currentGroup === null) {
+      // Start a new image group
+      currentGroup = {
+        type: "image-group",
+        messages: [message],
+        direction: message.direction,
+        startTime: message.createdAt
+      };
+    } else if (
+      isImage &&
+      currentGroup &&
+      currentGroup.type === "image-group" &&
+      currentGroup.direction === message.direction &&
+      message.createdAt - currentGroup.startTime <= TWO_MINUTES
+    ) {
+      // Add to current group
+      currentGroup.messages.push(message);
+    } else {
+      // Not consecutive, save current group if exists
+      if (currentGroup) {
+        groups.push(currentGroup);
+        currentGroup = null;
+      }
+      // Add single message
+      groups.push({ type: "single", message });
+    }
+  }
+
+  // Don't forget the last group
+  if (currentGroup) {
+    groups.push(currentGroup);
+  }
+
+  return groups;
+}
+
+function renderGridImage(group, onImageClick) {
+  const images = group.messages.map(msg => msg.mediaFile).filter(Boolean);
+  if (images.length === 0) return null;
+
+  if (images.length === 1) {
+    const img = images[0];
+    const mediaUrl = `${getApiBaseUrl()}/${img.relativePath}`;
+    return (
+      <img
+        src={mediaUrl}
+        alt={img.originalName}
+        className="mb-2 h-24 w-24 cursor-pointer rounded-2xl object-cover"
+        onClick={() => onImageClick({ relativePath: img.relativePath, mimeType: img.mimeType })}
+      />
+    );
+  }
+
+  return (
+    <div className="mb-2 grid grid-cols-2 gap-1">
+      {images.map((img, idx) => {
+        const mediaUrl = `${getApiBaseUrl()}/${img.relativePath}`;
+        return (
+          <img
+            key={idx}
+            src={mediaUrl}
+            alt={img.originalName}
+            className="h-32 w-32 cursor-pointer rounded-lg object-cover"
+            onClick={() => onImageClick({ relativePath: img.relativePath, mimeType: img.mimeType })}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function renderMediaPreviewWithCallback(message, onImageClick) {
+  if (!message.mediaFile) {
+    return null;
+  }
+
+  const mediaUrl = `${getApiBaseUrl()}/${message.mediaFile.relativePath}`;
+  const mimeType = String(message.mediaFile.mimeType || "");
+  const isSticker = message.type === "sticker" || mimeType === "image/webp";
+
+  if (isSticker) {
+    return (
+      <a href={mediaUrl} target="_blank" rel="noreferrer" className="mb-2 inline-flex overflow-hidden rounded-2xl bg-transparent">
+        <img src={mediaUrl} alt={message.mediaFile.originalName} className="h-36 w-36 object-contain drop-shadow-sm" />
+      </a>
+    );
+  }
+
+  if (isImageFile(mimeType)) {
+    return (
+      <img
+        src={mediaUrl}
+        alt={message.mediaFile.originalName}
+        className="mb-2 max-h-[320px] w-full cursor-pointer rounded-2xl object-cover"
+        onClick={() => onImageClick && onImageClick({ relativePath: message.mediaFile.relativePath, mimeType: message.mediaFile.mimeType })}
+      />
+    );
+  }
+
+  if (mimeType.startsWith("video/")) {
+    return (
+      <video controls className="mb-2 max-h-[320px] w-full rounded-2xl bg-black">
+        <source src={mediaUrl} type={mimeType} />
+      </video>
+    );
+  }
+
+  if (mimeType.startsWith("audio/")) {
+    return <audio controls className="mb-2 w-full"><source src={mediaUrl} type={mimeType} /></audio>;
+  }
+
+  return (
+    <a href={mediaUrl} target="_blank" rel="noreferrer" className="mb-2 inline-flex rounded-xl bg-white/10 px-3 py-2 text-sm font-medium text-white underline-offset-2 hover:underline">
+      {message.mediaFile.originalName}
+    </a>
+  );
+}
+
 export const ChatWindow = forwardRef(function ChatWindow({
   chat,
   messages,
@@ -124,12 +259,20 @@ export const ChatWindow = forwardRef(function ChatWindow({
   const [forwardTargetChatId, setForwardTargetChatId] = useState("");
   const [searchOpen, setSearchOpen] = useState(Boolean(messageQuery));
   const [searchResultIndex, setSearchResultIndex] = useState(0);
+  const [hoveredMessageId, setHoveredMessageId] = useState(null);
+  const [activeMenuMessageId, setActiveMenuMessageId] = useState(null);
+  const [selectedMediaModal, setSelectedMediaModal] = useState(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState([]);
   const composerRef = useRef(null);
   const searchInputRef = useRef(null);
   const messagesViewportRef = useRef(null);
   const messagesEndRef = useRef(null);
   const pendingOpenChatScrollRef = useRef(false);
   const previousMessagesCountRef = useRef(0);
+  const fileInputRef = useRef(null);
+  const menuTriggerRef = useRef(null);
+  const emojiTriggerRef = useRef(null);
 
   const searchResults = useMemo(() => {
     const query = String(messageQuery || "").trim().toLowerCase();
@@ -417,75 +560,139 @@ export const ChatWindow = forwardRef(function ChatWindow({
         ) : null}
 
         <div className="space-y-3">
-          {messages.map((message) => {
-            const outbound = message.direction === "outbound";
-            const messageIndexInAll = messages.indexOf(message);
-            const isSearchResult = messageQuery && searchResults.includes(messageIndexInAll);
-            const isCurrentSearchResult = isSearchResult && searchResults[searchResultIndex] === messageIndexInAll;
-
-            return (
-              <div key={message.id} data-message-id={message.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[72%] rounded-[18px] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-colors ${
-                  isCurrentSearchResult 
-                    ? "ring-2 ring-brand-500 " + (outbound ? "bg-[#1a5f41]" : "bg-[#3a4a4a]")
-                    : isSearchResult 
-                    ? "ring-1 ring-brand-500/50 " + (outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]")
-                    : outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]"
-                }`}>
-                  {message.replyTo ? (
-                    <div className="mb-2 rounded-2xl border-l-4 border-brand-500 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
-                      <span className="font-semibold text-white">{message.replyTo.direction === "outbound" ? "Anda" : chat.contact.displayName}</span>
-                      <p className="mt-1 truncate">{previewReply(message.replyTo)}</p>
-                    </div>
-                  ) : null}
-
-                  {renderMediaPreview(message)}
-                  {message.body ? <p className="whitespace-pre-wrap text-sm leading-6 text-white/88">{message.body}</p> : null}
-
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[11px] text-white/35">
-                    <div className="flex flex-wrap gap-2">
-                      <button type="button" title="Reply" aria-label="Reply" className="rounded-full px-2 py-1 transition hover:bg-white/[0.06] hover:text-white" onClick={() => setReplyTo(message)}>↩</button>
-                      {outbound ? <button type="button" title="Delete" aria-label="Delete" className="rounded-full px-2 py-1 transition hover:bg-red-500/10 hover:text-red-300" onClick={() => onDeleteMessage(message.id)}>🗑</button> : null}
-                      <button
-                        type="button"
-                        title="Forward"
-                        aria-label="Forward"
-                        className="rounded-full px-2 py-1 transition hover:bg-white/[0.06] hover:text-white"
-                        onClick={() => {
-                          setForwardingMessageId((current) => (current === message.id ? null : message.id));
-                          setForwardTargetChatId("");
-                        }}
-                      >
-                        ↪
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span>{formatTime(message.createdAt)}</span>
-                      {outbound ? <span>{renderStatus(message)}</span> : null}
+          {(() => {
+            const groupedMessages = groupConsecutiveImages(messages);
+            return groupedMessages.map((group, groupIndex) => {
+              if (group.type === "image-group") {
+                // Render grouped images
+                const firstMessage = group.messages[0];
+                const outbound = firstMessage.direction === "outbound";
+                // Merge captions from all images in the group
+                const captions = group.messages
+                  .map(msg => msg.body)
+                  .filter(Boolean)
+                  .join("\n");
+                
+                return (
+                  <div key={`group-${groupIndex}`} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
+                    <div 
+                      className={`max-w-[72%] rounded-[18px] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-colors relative ${
+                        outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]"
+                      }`}
+                    >
+                      {renderGridImage(group, (media) => setSelectedMediaModal(media))}
+                      {captions ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/88">{captions}</p> : null}
+                      <div className="mt-3 flex items-center justify-end gap-2 text-[11px] text-white/35">
+                        <span>{formatTime(firstMessage.createdAt)}</span>
+                        {outbound ? <span>{renderStatus(firstMessage)}</span> : null}
+                      </div>
                     </div>
                   </div>
+                );
+              } else {
+                // Render single message
+                const message = group.message;
+                const outbound = message.direction === "outbound";
+                const messageIndexInAll = messages.indexOf(message);
+                const isSearchResult = messageQuery && searchResults.includes(messageIndexInAll);
+                const isCurrentSearchResult = isSearchResult && searchResults[searchResultIndex] === messageIndexInAll;
 
-                  {forwardingMessageId === message.id ? (
-                    <div className="mt-3 flex flex-wrap gap-2 rounded-2xl bg-white/[0.04] p-3">
-                      <select
-                        className="min-w-[200px] flex-1 rounded-xl border border-white/10 bg-[#0b141a] px-3 py-2 text-sm text-white outline-none"
-                        value={forwardTargetChatId}
-                        onChange={(event) => setForwardTargetChatId(event.target.value)}
-                      >
-                        <option value="">Select target chat</option>
-                        {forwardTargets.map((target) => (
-                          <option key={target.id} value={target.id}>
-                            {target.contact.displayName}
-                          </option>
-                        ))}
-                      </select>
-                      <button type="button" className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]" onClick={() => handleForward(message.id)}>Send</button>
+                return (
+                  <div key={message.id} data-message-id={message.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
+                    <div 
+                      className={`max-w-[72%] rounded-[18px] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-colors relative ${
+                        isCurrentSearchResult 
+                          ? "ring-2 ring-brand-500 " + (outbound ? "bg-[#1a5f41]" : "bg-[#3a4a4a]")
+                          : isSearchResult 
+                          ? "ring-1 ring-brand-500/50 " + (outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]")
+                          : outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]"
+                      }`}
+                      onMouseEnter={() => setHoveredMessageId(message.id)}
+                      onMouseLeave={() => setHoveredMessageId(null)}
+                    >
+                      {message.replyTo ? (
+                        <div className="mb-2 rounded-2xl border-l-4 border-brand-500 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
+                          <span className="font-semibold text-white">{message.replyTo.direction === "outbound" ? "Anda" : chat.contact.displayName}</span>
+                          <p className="mt-1 truncate">{previewReply(message.replyTo)}</p>
+                        </div>
+                      ) : null}
+
+                      {renderMediaPreviewWithCallback(message, (media) => setSelectedMediaModal(media))}
+                      {message.body ? <p className="whitespace-pre-wrap text-sm leading-6 text-white/88">{message.body}</p> : null}
+
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[11px] text-white/35">
+                        <div className="flex flex-wrap gap-2">
+                          <button type="button" title="Reply" aria-label="Reply" className="rounded-full px-2 py-1 transition hover:bg-white/[0.06] hover:text-white" onClick={() => setReplyTo(message)}>↩</button>
+                          {outbound ? <button type="button" title="Delete" aria-label="Delete" className="rounded-full px-2 py-1 transition hover:bg-red-500/10 hover:text-red-300" onClick={() => onDeleteMessage(message.id)}>🗑</button> : null}
+                          <button
+                            type="button"
+                            title="Forward"
+                            aria-label="Forward"
+                            className="rounded-full px-2 py-1 transition hover:bg-white/[0.06] hover:text-white"
+                            onClick={() => {
+                              setForwardingMessageId((current) => (current === message.id ? null : message.id));
+                              setForwardTargetChatId("");
+                            }}
+                          >
+                            ↪
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span>{formatTime(message.createdAt)}</span>
+                          {outbound ? <span>{renderStatus(message)}</span> : null}
+                        </div>
+                      </div>
+
+                      {hoveredMessageId === message.id && (
+                        <div className="absolute right-2 top-2 flex items-center gap-1">
+                          <button
+                            type="button"
+                            ref={menuTriggerRef}
+                            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2e2f2f] text-white/60 transition hover:bg-[#3a3b3b] hover:text-white"
+                            onClick={() => setActiveMenuMessageId((current) => (current === message.id ? null : message.id))}
+                            title="More options"
+                          >
+                            ⋮
+                          </button>
+                          <MessageActionMenu
+                            isOpen={activeMenuMessageId === message.id}
+                            onClose={() => setActiveMenuMessageId(null)}
+                            message={message}
+                            onReply={() => setReplyTo(message)}
+                            onDelete={() => onDeleteMessage(message.id)}
+                            onForward={() => {
+                              setForwardingMessageId((current) => (current === message.id ? null : message.id));
+                              setForwardTargetChatId("");
+                            }}
+                            isOutbound={outbound}
+                            triggerRef={menuTriggerRef}
+                          />
+                        </div>
+                      )}
+
+                      {forwardingMessageId === message.id ? (
+                        <div className="mt-3 flex flex-wrap gap-2 rounded-2xl bg-white/[0.04] p-3">
+                          <select
+                            className="min-w-[200px] flex-1 rounded-xl border border-white/10 bg-[#0b141a] px-3 py-2 text-sm text-white outline-none"
+                            value={forwardTargetChatId}
+                            onChange={(event) => setForwardTargetChatId(event.target.value)}
+                          >
+                            <option value="">Select target chat</option>
+                            {forwardTargets.map((target) => (
+                              <option key={target.id} value={target.id}>
+                                {target.contact.displayName}
+                              </option>
+                            ))}
+                          </select>
+                          <button type="button" className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]" onClick={() => handleForward(message.id)}>Send</button>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+                  </div>
+                );
+              }
+            });
+          })()}
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -532,6 +739,12 @@ export const ChatWindow = forwardRef(function ChatWindow({
           </button>
         </div>
       </form>
+      {selectedMediaModal && (
+        <MediaPreviewModal
+          media={selectedMediaModal}
+          onClose={() => setSelectedMediaModal(null)}
+        />
+      )}
     </section>
   );
 });

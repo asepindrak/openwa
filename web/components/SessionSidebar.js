@@ -2,7 +2,7 @@ import { BrandLogo } from "@/components/BrandLogo";
 
 function SessionStatusBadge({ status }) {
   const colors = {
-    ready: "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/20",
+    ready: "bg-brand-500/15 text-brand-100 ring-1 ring-brand-400/20",
     connecting: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-400/20",
     disconnected: "bg-white/8 text-white/60 ring-1 ring-white/10",
     error: "bg-red-500/15 text-red-100 ring-1 ring-red-400/20"

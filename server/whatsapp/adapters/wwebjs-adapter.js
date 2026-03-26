@@ -3,37 +3,6 @@ const QRCode = require("qrcode");
 const path = require("path");
 const { sessionsDir, rootDir } = require("../../utils/paths");
 
-function createAvatarDiagnosticsBucket() {
-  return {
-    total: 0,
-    found: 0,
-    missing: 0,
-    newsletterGuard: 0,
-    serverStatus: 0,
-    error: 0,
-    samples: {
-      found: [],
-      missing: [],
-      newsletterGuard: [],
-      serverStatus: [],
-      error: []
-    }
-  };
-}
-
-function pushAvatarDiagnosticSample(bucket, status, detail) {
-  const collection = bucket.samples[status];
-  if (!collection || collection.length >= 5) {
-    return;
-  }
-
-  collection.push(detail);
-}
-
-function summarizeAvatarDiagnostics(diagnostics) {
-  return `contacts(total=${diagnostics.contacts.total}, found=${diagnostics.contacts.found}, missing=${diagnostics.contacts.missing}, newsletterGuard=${diagnostics.contacts.newsletterGuard}, serverStatus=${diagnostics.contacts.serverStatus}, error=${diagnostics.contacts.error}) chats(total=${diagnostics.chats.total}, found=${diagnostics.chats.found}, missing=${diagnostics.chats.missing}, newsletterGuard=${diagnostics.chats.newsletterGuard}, serverStatus=${diagnostics.chats.serverStatus}, error=${diagnostics.chats.error})`;
-}
-
 class WwebjsAdapter extends EventEmitter {
   constructor({ session }) {
     super();
@@ -136,74 +105,6 @@ class WwebjsAdapter extends EventEmitter {
     return result.url;
   }
 
-  registerAvatarDiagnostic(bucket, detail) {
-    bucket.total += 1;
-    if (detail.status === "found") {
-      bucket.found += 1;
-      pushAvatarDiagnosticSample(bucket, "found", {
-        externalId: detail.externalId
-      });
-      return;
-    }
-
-    if (detail.status === "newsletterGuard") {
-      bucket.newsletterGuard += 1;
-      pushAvatarDiagnosticSample(bucket, "newsletterGuard", {
-        externalId: detail.externalId,
-        reason: detail.reason
-      });
-      return;
-    }
-
-    if (detail.status === "serverStatus") {
-      bucket.serverStatus += 1;
-      pushAvatarDiagnosticSample(bucket, "serverStatus", {
-        externalId: detail.externalId,
-        reason: detail.reason
-      });
-      return;
-    }
-
-    if (detail.status === "error") {
-      bucket.error += 1;
-      pushAvatarDiagnosticSample(bucket, "error", {
-        externalId: detail.externalId,
-        reason: detail.reason,
-        errorName: detail.errorName || null
-      });
-      return;
-    }
-
-    bucket.missing += 1;
-    pushAvatarDiagnosticSample(bucket, "missing", {
-      externalId: detail.externalId,
-      reason: detail.reason
-    });
-  }
-
-  logAvatarDiagnostics(diagnostics) {
-    console.log(`[OpenWA][AvatarDiagnostics][session:${this.session.id}] ${summarizeAvatarDiagnostics(diagnostics)}`);
-
-    const sampleGroups = [
-      ["contact-missing", diagnostics.contacts.samples.missing],
-      ["contact-newsletter-guard", diagnostics.contacts.samples.newsletterGuard],
-      ["contact-server-status", diagnostics.contacts.samples.serverStatus],
-      ["contact-error", diagnostics.contacts.samples.error],
-      ["chat-missing", diagnostics.chats.samples.missing],
-      ["chat-newsletter-guard", diagnostics.chats.samples.newsletterGuard],
-      ["chat-server-status", diagnostics.chats.samples.serverStatus],
-      ["chat-error", diagnostics.chats.samples.error]
-    ];
-
-    for (const [label, samples] of sampleGroups) {
-      if (!samples.length) {
-        continue;
-      }
-
-      console.log(`[OpenWA][AvatarDiagnostics][session:${this.session.id}][${label}] ${JSON.stringify(samples)}`);
-    }
-  }
-
   async connect() {
     const { Client, LocalAuth } = require("whatsapp-web.js");
 
@@ -286,20 +187,10 @@ class WwebjsAdapter extends EventEmitter {
     }
 
     const [contacts, chats] = await Promise.all([this.client.getContacts(), this.client.getChats()]);
-    const diagnostics = {
-      contacts: createAvatarDiagnosticsBucket(),
-      chats: createAvatarDiagnosticsBucket()
-    };
     const contactSnapshots = await Promise.all(
       contacts.map(async (contact) => {
         const externalId = contact.id?._serialized || "";
         const avatarResult = await this.resolveProfilePic(externalId);
-        this.registerAvatarDiagnostic(diagnostics.contacts, {
-          externalId,
-          status: avatarResult.status,
-          reason: avatarResult.reason,
-          errorName: avatarResult.errorName || null
-        });
 
         return {
           externalId,
@@ -323,13 +214,6 @@ class WwebjsAdapter extends EventEmitter {
         ? { url: contactAvatarMap.get(externalId), status: "found", reason: "reused-contact-avatar" }
         : await this.resolveProfilePic(externalId);
 
-      this.registerAvatarDiagnostic(diagnostics.chats, {
-        externalId,
-        status: chatAvatarResult.status,
-        reason: chatAvatarResult.reason,
-        errorName: chatAvatarResult.errorName || null
-      });
-
       chatSnapshots.push({
         externalId,
         name: chat.name || chat.formattedTitle || externalId,
@@ -346,8 +230,6 @@ class WwebjsAdapter extends EventEmitter {
         }))
       });
     }
-
-    this.logAvatarDiagnostics(diagnostics);
 
     return {
       contacts: contactSnapshots,
