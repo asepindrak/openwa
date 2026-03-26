@@ -1,5 +1,7 @@
 node_modules
 web\.next
+.vscode
+.wwebjs_cache
 storage\database\openwa.db
 storage\database\openwa.db-journal
 storage\database\openwa.db-shm
