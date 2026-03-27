@@ -12,7 +12,7 @@ This guide covers deploying OpenWA in various environments.
 ### Installation
 
 ```bash
-npm i -g @asepindrak/openwa
+npm i -g @adens/openwa
 ```
 
 ### Run

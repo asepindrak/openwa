@@ -1,7 +1,7 @@
 {
-  "name": "@asepindrak/openwa",
+  "name": "@adens/openwa",
   "version": "0.1.0",
-  "description": "CLI package for running the self-hosted OpenWA dashboard (Whatsapp Web) locally.",
+  "description": "Self-hosted WhatsApp workspace with multi-session management, REST API, JWT & API key authentication, real-time messaging via Socket.IO, media upload, Swagger documentation, and AI-agent integration support.",
   "license": "MIT",
   "author": "asepindrak <asepindrakurniawan@gmail.com>",
   "repository": {
