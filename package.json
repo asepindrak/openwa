@@ -32,7 +32,7 @@
     "build:web": "node ./node_modules/next/dist/bin/next build web",
     "prisma:generate": "node ./node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
     "prisma:push": "node ./node_modules/prisma/build/index.js db push --schema prisma/schema.prisma",
-    "publish": "npm run build && npm publish --access=public",
+    "publish": "npm publish --access=public",
     "prepublishOnly": "npm run build"
   },
   "engines": {
