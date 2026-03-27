@@ -32,6 +32,7 @@
     "build:web": "node ./node_modules/next/dist/bin/next build web",
     "prisma:generate": "node ./node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
     "prisma:push": "node ./node_modules/prisma/build/index.js db push --schema prisma/schema.prisma",
+    "postinstall": "node ./node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
     "publish": "npm publish --access=public",
     "prepublishOnly": "npm run build",
     "release:patch": "npm run build && npm version patch && npm publish --access=public",
