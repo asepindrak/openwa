@@ -13,14 +13,6 @@
     "url": "https://github.com/asepindrak/openwa/issues"
   },
   "preferGlobal": true,
-  "files": [
-    "bin",
-    "prisma",
-    "server",
-    "storage",
-    "web",
-    "package.json"
-  ],
   "keywords": [
     "openwa",
     "cli",
