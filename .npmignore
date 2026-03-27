@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+package-lock.json
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Development
+.git
+.gitignore
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Build artifacts
+.next
+web/.next
+web/out
+dist
+build
+
+# Storage and sessions (runtime data)
+storage/
+
+# Testing
+.pytest_cache
+.coverage
+.nyc_output
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Config
+.eslintrc*
+.prettierrc*
+tsconfig.json
+next.config.js
+
+# Documentation and examples
+openwa_prompt.md
+DEPLOYMENT.md
+FEATURES.md
+
+# IDE
+.DS_Store
+Thumbs.db
