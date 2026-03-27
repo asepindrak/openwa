@@ -48,7 +48,7 @@ If you find this project useful, please also support and star the `whatsapp-web.
 Install OpenWA globally:
 
 ```bash
-npm i -g @asepindrak/openwa
+npm i -g openwa
 ```
 
 Run OpenWA:

@@ -1,5 +1,5 @@
 {
-  "name": "@asepindrak/openwa",
+  "name": "openwa",
   "version": "0.1.0",
   "description": "CLI package for running the self-hosted OpenWA dashboard (Whatsapp Web) locally.",
   "license": "MIT",

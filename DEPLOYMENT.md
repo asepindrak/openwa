@@ -5,15 +5,18 @@ This guide covers deploying OpenWA in various environments.
 ## Quick Start (Global CLI)
 
 ### Prerequisites
+
 - Node.js 20+
 - npm
 
 ### Installation
+
 ```bash
-npm i -g @asepindrak/openwa
+npm i -g openwa
 ```
 
 ### Run
+
 ```bash
 openwa
 ```
@@ -23,11 +26,13 @@ This starts both frontend (port 55111) and backend (port 55222) and automaticall
 ## Local Development
 
 ### Prerequisites
+
 - Node.js 20+
 - npm or yarn
 - SQLite (included)
 
 ### Setup
+
 ```bash
 git clone https://github.com/asepindrak/openwa.git
 cd openwa
@@ -35,6 +40,7 @@ npm install
 ```
 
 ### Development Server
+
 ```bash
 npm run dev
 ```
@@ -42,6 +48,7 @@ npm run dev
 This starts both frontend (port 55111) and backend (port 55222) in development mode.
 
 ### Production Build
+
 ```bash
 npm run build
 npm start
@@ -50,11 +57,13 @@ npm start
 ## Docker Deployment
 
 ### Build Docker Image
+
 ```bash
 docker build -t openwa:latest .
 ```
 
 ### Run Docker Container
+
 ```bash
 docker run -p 55111:55111 -p 55222:55222 \
   -e OPENWA_FRONTEND_URL=http://localhost:55111 \
@@ -91,34 +100,38 @@ DATABASE_URL=file:./storage/database/openwa.db
 
 ### Environment Variables Explained
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `HOST` | 127.0.0.1 | Server host address |
-| `FE_PORT` | 55111 | Frontend port |
-| `BE_PORT` | 55222 | Backend API port |
-| `OPENWA_FRONTEND_URL` | http://localhost:55111 | Frontend URL |
-| `OPENWA_BACKEND_URL` | http://localhost:55222 | Backend URL |
-| `OPENWA_JWT_SECRET` | openwa-local-dev-secret | JWT signing secret |
-| `OPENWA_AUTO_OPEN` | true | Auto-open browser on start |
-| `OPENWA_USE_WWEBJS` | true | Enable WhatsApp Web adapter |
-| `OPENWA_ALLOW_MOCK` | false | Allow mock adapter |
-| `DATABASE_URL` | file:./storage/database/openwa.db | SQLite database path |
+| Variable              | Default                           | Purpose                     |
+| --------------------- | --------------------------------- | --------------------------- |
+| `HOST`                | 127.0.0.1                         | Server host address         |
+| `FE_PORT`             | 55111                             | Frontend port               |
+| `BE_PORT`             | 55222                             | Backend API port            |
+| `OPENWA_FRONTEND_URL` | http://localhost:55111            | Frontend URL                |
+| `OPENWA_BACKEND_URL`  | http://localhost:55222            | Backend URL                 |
+| `OPENWA_JWT_SECRET`   | openwa-local-dev-secret           | JWT signing secret          |
+| `OPENWA_AUTO_OPEN`    | true                              | Auto-open browser on start  |
+| `OPENWA_USE_WWEBJS`   | true                              | Enable WhatsApp Web adapter |
+| `OPENWA_ALLOW_MOCK`   | false                             | Allow mock adapter          |
+| `DATABASE_URL`        | file:./storage/database/openwa.db | SQLite database path        |
 
 ## Database Migration
 
 ### First Run
+
 On first run, Prisma automatically creates the database schema:
+
 ```bash
 npm run build
 npm start
 ```
 
 ### Manual Migration
+
 ```bash
 npx prisma migrate deploy
 ```
 
 ### Database Reset
+
 ```bash
 npx prisma migrate reset
 ```
@@ -126,6 +139,7 @@ npx prisma migrate reset
 ## Reverse Proxy Configuration
 
 ### Nginx
+
 ```nginx
 server {
     listen 80;
@@ -154,14 +168,15 @@ server {
 ```
 
 ### Apache
+
 ```apache
 <VirtualHost *:80>
     ServerName openwa.example.com
-    
+
     ProxyPreserveHost On
     ProxyPass / http://localhost:55111/
     ProxyPassReverse / http://localhost:55111/
-    
+
     ProxyPass /api http://localhost:55222/
     ProxyPassReverse /api http://localhost:55222/
 </VirtualHost>
@@ -170,11 +185,13 @@ server {
 ## SSL/HTTPS Configuration
 
 ### Using Let's Encrypt with Nginx
+
 ```bash
 certbot certonly --nginx -d openwa.example.com
 ```
 
 Update Nginx configuration:
+
 ```nginx
 listen 443 ssl http2;
 ssl_certificate /etc/letsencrypt/live/openwa.example.com/fullchain.pem;
@@ -204,6 +221,7 @@ WantedBy=multi-user.target
 ```
 
 Start service:
+
 ```bash
 sudo systemctl enable openwa
 sudo systemctl start openwa
@@ -212,11 +230,13 @@ sudo systemctl start openwa
 ## Monitoring
 
 ### Health Check
+
 ```bash
 curl http://localhost:55111/health
 ```
 
 ### Logs
+
 ```bash
 # Frontend logs
 npm run logs:frontend
@@ -226,6 +246,7 @@ npm run logs:backend
 ```
 
 ### Database Backup
+
 ```bash
 cp storage/database/openwa.db backup/openwa.db.$(date +%Y%m%d_%H%M%S)
 ```
@@ -233,12 +254,15 @@ cp storage/database/openwa.db backup/openwa.db.$(date +%Y%m%d_%H%M%S)
 ## Performance Optimization
 
 ### Node.js Memory
+
 ```bash
 NODE_OPTIONS="--max-old-space-size=4096" npm start
 ```
 
 ### Database Optimization
+
 Enable WAL mode in SQLite:
+
 ```bash
 sqlite3 storage/database/openwa.db "PRAGMA journal_mode=WAL;"
 ```
@@ -246,6 +270,7 @@ sqlite3 storage/database/openwa.db "PRAGMA journal_mode=WAL;"
 ## Troubleshooting
 
 ### Port Already in Use
+
 ```bash
 # Find process using port
 lsof -i :55111
@@ -255,6 +280,7 @@ kill -9 <PID>
 ```
 
 ### Database Locked
+
 ```bash
 # Reset database
 npm run db:reset
@@ -265,6 +291,7 @@ npm start
 ```
 
 ### WhatsApp Session Issues
+
 - Ensure WhatsApp account is not connected to another WhatsApp Web session
 - Scan QR code quickly (expires after 20 seconds)
 - Check internet connection stability
@@ -273,12 +300,14 @@ npm start
 ## Scaling
 
 ### Horizontal Scaling
+
 - Separate frontend and backend deployments
 - Use load balancer (Nginx, HAProxy)
 - Share database via network path or managed database service
 - Consider moving from SQLite to PostgreSQL
 
 ### Vertical Scaling
+
 - Increase server resources (CPU, RAM)
 - Optimize Node.js heap size
 - Enable production mode (`NODE_ENV=production`)
@@ -317,6 +346,7 @@ npm start
 ## Support
 
 For issues and questions:
+
 - GitHub Issues: https://github.com/asepindrak/openwa/issues
 - Discussions: https://github.com/asepindrak/openwa/discussions
 - Documentation: See README.md and FEATURES.md
