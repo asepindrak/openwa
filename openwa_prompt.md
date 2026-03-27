@@ -20,7 +20,7 @@ dashboard**.
 User installs the package globally:
 
 ``` bash
-npm i -g openwa
+npm i -g @asepindrak/openwa
 ```
 
 Then runs:
@@ -307,7 +307,7 @@ Each message must store:
 The system must work like this:
 
 ``` bash
-npm i -g openwa
+npm i -g @asepindrak/openwa
 openwa
 ```
 
