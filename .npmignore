@@ -23,6 +23,10 @@ web/out
 dist
 build
 
+# Web source (not needed for global npm installs)
+web/
+
+
 # Storage and sessions (runtime data)
 storage/
 .wwebjs_cache

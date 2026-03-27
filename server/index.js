@@ -16,7 +16,12 @@ const { SessionManager } = require("./whatsapp/session-manager");
 const openBrowser = openModule.default || openModule;
 function shouldProxyToBackend(req) {
   const url = new URL(req.url || "/", "http://localhost");
-  return url.pathname === "/health" || url.pathname === "/version" || url.pathname === "/docs" || url.pathname.startsWith("/docs/");
+  return (
+    url.pathname === "/health" ||
+    url.pathname === "/version" ||
+    url.pathname === "/docs" ||
+    url.pathname.startsWith("/docs/")
+  );
 }
 
 async function proxyToBackend(req, res, config) {
@@ -24,8 +29,8 @@ async function proxyToBackend(req, res, config) {
   const response = await fetch(targetUrl, {
     method: req.method,
     headers: {
-      accept: req.headers.accept || "*/*"
-    }
+      accept: req.headers.accept || "*/*",
+    },
   });
 
   res.statusCode = response.status;
@@ -47,12 +52,24 @@ function ensureWebBuild(config) {
     return;
   }
 
-  console.log("Next.js production build not found. Building dashboard automatically...");
+  // Skip build if source files don't exist (e.g., global npm install)
+  const pagesDir = path.join(webDir, "pages");
+  if (!fs.existsSync(pagesDir)) {
+    console.warn("⚠️  Web dashboard source files not found. Skipping build.");
+    console.warn(
+      "   Dashboard might not be available. This is expected for global npm installs.",
+    );
+    return;
+  }
+
+  console.log(
+    "Next.js production build not found. Building dashboard automatically...",
+  );
   const result = spawnSync("npm", ["run", "build:web"], {
     cwd: path.dirname(webDir),
     stdio: "inherit",
     env: process.env,
-    shell: true
+    shell: true,
   });
 
   if (result.status !== 0) {
@@ -71,7 +88,7 @@ async function startOpenWA({ dev = false } = {}) {
 
   const nextApp = next({
     dev: config.dev,
-    dir: webDir
+    dir: webDir,
   });
 
   await nextApp.prepare();
@@ -80,7 +97,7 @@ async function startOpenWA({ dev = false } = {}) {
   const sessionManager = new SessionManager({ config });
   const app = createApp({
     config,
-    sessionManager
+    sessionManager,
   });
 
   const backendServer = createServer(app);
@@ -101,8 +118,8 @@ async function startOpenWA({ dev = false } = {}) {
   const io = new Server(backendServer, {
     cors: {
       origin: config.frontendUrl,
-      credentials: true
-    }
+      credentials: true,
+    },
   });
 
   sessionManager.on("session-status", (payload) => {
@@ -126,7 +143,7 @@ async function startOpenWA({ dev = false } = {}) {
   registerSocketHandlers({
     io,
     config,
-    sessionManager
+    sessionManager,
   });
 
   await new Promise((resolve) => {
@@ -137,7 +154,8 @@ async function startOpenWA({ dev = false } = {}) {
     frontendServer.listen(config.frontendPort, config.host, resolve);
   });
 
-  const reconnectableSessions = await sessionService.listReconnectableSessions();
+  const reconnectableSessions =
+    await sessionService.listReconnectableSessions();
   await sessionManager.hydrate(reconnectableSessions);
 
   console.log("OpenWA is running 🚀\n");
@@ -159,5 +177,5 @@ async function startOpenWA({ dev = false } = {}) {
 }
 
 module.exports = {
-  startOpenWA
+  startOpenWA,
 };

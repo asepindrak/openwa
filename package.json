@@ -28,6 +28,7 @@
   "scripts": {
     "dev": "node bin/openwa.js --dev",
     "start": "node bin/openwa.js",
+    "pack": "npm run build && npm pack",
     "build": "node ./node_modules/prisma/build/index.js generate --schema prisma/schema.prisma && npm run build:web",
     "build:web": "node ./node_modules/next/dist/bin/next build web",
     "prisma:generate": "node ./node_modules/prisma/build/index.js generate --schema prisma/schema.prisma",
