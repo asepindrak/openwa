@@ -58,7 +58,7 @@ export function EmojiPicker({ isOpen, onClose, onEmojiSelect, triggerRef }) {
   return (
     <div 
       ref={pickerRef}
-      className="absolute bottom-full left-0 z-50 mb-2 w-80 rounded-2xl border border-white/10 bg-[#1a1b1b] shadow-[0_16px_32px_rgba(0,0,0,0.4)]"
+      className="relative mb-2 w-80 rounded-2xl border border-white/10 bg-[#1a1b1b] shadow-[0_16px_32px_rgba(0,0,0,0.4)]"
     >
       <div className="flex h-12 items-center border-b border-white/10 px-3">
         <h3 className="flex-1 text-sm font-semibold text-white">Emoji</h3>

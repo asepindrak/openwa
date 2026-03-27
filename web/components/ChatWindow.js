@@ -3,6 +3,7 @@ import { getApiBaseUrl } from "@/lib/api";
 import { MessageActionMenu } from "./MessageActionMenu";
 import { MediaPreviewModal } from "./MediaPreviewModal";
 import { EmojiPicker } from "./EmojiPicker";
+import { SendButtonSpinner } from "./Skeletons";
 
 function formatTime(value) {
   if (!value) {
@@ -118,14 +119,14 @@ function groupConsecutiveImages(messages) {
         type: "image-group",
         messages: [message],
         direction: message.direction,
-        startTime: message.createdAt
+        startTime: new Date(message.createdAt).getTime()
       };
     } else if (
       isImage &&
       currentGroup &&
       currentGroup.type === "image-group" &&
       currentGroup.direction === message.direction &&
-      message.createdAt - currentGroup.startTime <= TWO_MINUTES
+      (new Date(message.createdAt).getTime() - currentGroup.startTime) <= TWO_MINUTES
     ) {
       // Add to current group
       currentGroup.messages.push(message);
@@ -136,7 +137,9 @@ function groupConsecutiveImages(messages) {
         currentGroup = null;
       }
       // Add single message
-      groups.push({ type: "single", message });
+      if (!isImage) {
+        groups.push({ type: "single", message });
+      }
     }
   }
 
@@ -160,7 +163,13 @@ function renderGridImage(group, onImageClick) {
         src={mediaUrl}
         alt={img.originalName}
         className="mb-2 h-24 w-24 cursor-pointer rounded-2xl object-cover"
-        onClick={() => onImageClick({ relativePath: img.relativePath, mimeType: img.mimeType })}
+        onClick={() => onImageClick({ 
+          mediaUrl, 
+          relativePath: img.relativePath, 
+          mimeType: img.mimeType,
+          originalName: img.originalName,
+          isImage: true
+        })}
       />
     );
   }
@@ -175,7 +184,13 @@ function renderGridImage(group, onImageClick) {
             src={mediaUrl}
             alt={img.originalName}
             className="h-32 w-32 cursor-pointer rounded-lg object-cover"
-            onClick={() => onImageClick({ relativePath: img.relativePath, mimeType: img.mimeType })}
+            onClick={() => onImageClick({ 
+              mediaUrl, 
+              relativePath: img.relativePath, 
+              mimeType: img.mimeType,
+              originalName: img.originalName,
+              isImage: true
+            })}
           />
         );
       })}
@@ -206,7 +221,13 @@ function renderMediaPreviewWithCallback(message, onImageClick) {
         src={mediaUrl}
         alt={message.mediaFile.originalName}
         className="mb-2 max-h-[320px] w-full cursor-pointer rounded-2xl object-cover"
-        onClick={() => onImageClick && onImageClick({ relativePath: message.mediaFile.relativePath, mimeType: message.mediaFile.mimeType })}
+        onClick={() => onImageClick && onImageClick({ 
+          mediaUrl, 
+          relativePath: message.mediaFile.relativePath, 
+          mimeType: message.mediaFile.mimeType,
+          originalName: message.mediaFile.originalName,
+          isImage: true
+        })}
       />
     );
   }
@@ -301,7 +322,11 @@ export const ChatWindow = forwardRef(function ChatWindow({
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    await sendDraft();
+    if (pendingFiles.length > 0) {
+      await handleSendWithFiles();
+    } else if (draft.trim()) {
+      await sendDraft();
+    }
   };
 
   const sendDraft = async () => {
@@ -322,21 +347,88 @@ export const ChatWindow = forwardRef(function ChatWindow({
   };
 
   const handleFile = async (event) => {
-    const file = event.target.files?.[0];
-    if (!file) {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
       return;
     }
 
+    const newPendingFiles = [];
+    for (let file of files) {
+      let preview = null;
+      const mimeType = file.type || "";
+
+      if (mimeType.startsWith("image/")) {
+        preview = URL.createObjectURL(file);
+      } else if (mimeType.startsWith("video/")) {
+        preview = URL.createObjectURL(file);
+      }
+
+      newPendingFiles.push({
+        file,
+        name: file.name,
+        size: file.size,
+        type: mimeType,
+        preview
+      });
+    }
+
+    setPendingFiles((current) => [...current, ...newPendingFiles]);
+    event.target.value = "";
+  };
+
+  const removePendingFile = (index) => {
+    setPendingFiles((current) => {
+      const updated = [...current];
+      const file = updated[index];
+      if (file.preview) {
+        URL.revokeObjectURL(file.preview);
+      }
+      updated.splice(index, 1);
+      return updated;
+    });
+  };
+
+  const handleSendWithFiles = async () => {
+    if (pendingFiles.length === 0) {
+      return sendDraft();
+    }
+
+    setBusy(true);
     setUploading(true);
     try {
-      await onSendMedia({ file, caption: draft.trim() });
+      for (let i = 0; i < pendingFiles.length; i++) {
+        const pendingFile = pendingFiles[i];
+        const isLastFile = i === pendingFiles.length - 1;
+        const caption = isLastFile ? draft.trim() : "";
+
+        await onSendMedia({ file: pendingFile.file, caption });
+      }
       setDraft("");
       setReplyTo(null);
+      setPendingFiles([]);
     } finally {
+      setBusy(false);
       setUploading(false);
-      event.target.value = "";
     }
   };
+
+  const handleEmojiSelect = (emoji) => {
+    const textarea = composerRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart || 0;
+    const end = textarea.selectionEnd || 0;
+    const newDraft = draft.slice(0, start) + emoji + draft.slice(end);
+    setDraft(newDraft);
+
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + emoji.length, start + emoji.length);
+    }, 0);
+
+    setEmojiPickerOpen(false);
+  };
+
 
   const handleForward = async (messageId) => {
     if (!forwardTargetChatId) {
@@ -708,16 +800,60 @@ export const ChatWindow = forwardRef(function ChatWindow({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2">
+        {pendingFiles.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2 rounded-2xl bg-white/[0.04] p-3">
+            {pendingFiles.map((file, index) => (
+              <div key={index} className="relative">
+                {file.preview && file.type.startsWith("image/") ? (
+                  <img src={file.preview} alt={file.name} className="h-16 w-16 rounded-lg object-cover" />
+                ) : file.preview && file.type.startsWith("video/") ? (
+                  <video src={file.preview} className="h-16 w-16 rounded-lg object-cover" />
+                ) : (
+                  <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-[#2e2f2f] text-sm font-medium text-white/60">
+                    {file.name.split(".").pop()?.toUpperCase() || "FILE"}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePendingFile(index)}
+                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-xs text-white transition hover:bg-red-600"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 relative">
           <label className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#2e2f2f] text-[24px] leading-none text-white/60 transition hover:bg-[#3a3b3b] hover:text-white">
             <span className="-mt-px">+</span>
-            <input type="file" className="hidden" onChange={handleFile} />
+            <input ref={fileInputRef} type="file" className="hidden" onChange={handleFile} multiple accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" />
           </label>
+          <button
+            type="button"
+            ref={emojiTriggerRef}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#2e2f2f] text-[20px] transition hover:bg-[#3a3b3b]"
+            onClick={() => setEmojiPickerOpen(!emojiPickerOpen)}
+            title="Emoji"
+          >
+            😊
+          </button>
+          {emojiPickerOpen && (
+            <div className="absolute bottom-full left-0 z-50">
+              <EmojiPicker
+                isOpen={emojiPickerOpen}
+                onClose={() => setEmojiPickerOpen(false)}
+                onEmojiSelect={handleEmojiSelect}
+                triggerRef={emojiTriggerRef}
+              />
+            </div>
+          )}
           <div className="flex flex-1 items-center rounded-[22px] bg-[#2e2f2f] px-4 py-2">
             <textarea
               ref={composerRef}
               rows={1}
-              className="min-h-[20px] w-full resize-none overflow-y-auto border-none bg-transparent px-1 py-0.5 text-sm leading-5 text-white outline-none placeholder:text-white/30"
+              className="min-h-[20px] w-full resize-none overflow-y-auto border-none bg-transparent px-1 py-0.5 text-sm leading-5 text-white outline-none placeholder:text-white/30 disabled:opacity-60"
               placeholder="Type a message"
               value={draft}
               onChange={(event) => {
@@ -732,10 +868,11 @@ export const ChatWindow = forwardRef(function ChatWindow({
                   }
                 }
               }}
+              disabled={busy || uploading}
             />
           </div>
           <button type="submit" className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-500 text-sm font-semibold leading-none text-[#10251a] transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60" disabled={busy || uploading}>
-            ➤
+            {busy || uploading ? <SendButtonSpinner /> : "➤"}
           </button>
         </div>
       </form>

@@ -26,7 +26,10 @@ export function MediaPreviewModal({ media, onClose }) {
     return null;
   }
 
-  const { mediaUrl, mimeType, originalName, isImage } = media;
+  const mediaUrl = media.mediaUrl || (media.relativePath ? `${getApiBaseUrl?.()}/` + media.relativePath : "");
+  const mimeType = media.mimeType || "";
+  const originalName = media.originalName || "media";
+  const isImage = media.isImage !== undefined ? media.isImage : mimeType.startsWith("image/") && mimeType !== "image/webp";
 
   const handleDownload = async () => {
     try {
@@ -42,6 +45,7 @@ export function MediaPreviewModal({ media, onClose }) {
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Download failed:", error);
+      alert("Download failed: " + error.message);
     }
   };
 
