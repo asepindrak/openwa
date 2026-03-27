@@ -4,7 +4,7 @@ import { MessageActionMenu } from "./MessageActionMenu";
 import { MediaPreviewModal } from "./MediaPreviewModal";
 import { EmojiPicker } from "./EmojiPicker";
 import { SendButtonSpinner } from "./Skeletons";
-import { MdMoreVert, MdSend, MdEmojiEmotions, MdSearch, MdAdd, MdSettings, MdLogout, MdClose } from "react-icons/md";
+import { MdMoreVert, MdSend, MdEmojiEmotions, MdSearch, MdAdd, MdSettings, MdLogout, MdClose, MdDelete } from "react-icons/md";
 
 function formatTime(value) {
   if (!value) {
@@ -713,9 +713,14 @@ export const ChatWindow = forwardRef(function ChatWindow({
                       {renderMediaPreviewWithCallback(message, (media) => setSelectedMediaModal(media))}
                       {message.body ? <p className="whitespace-pre-wrap text-sm leading-6 text-white/88">{message.body}</p> : null}
 
-                      <div className="mt-3 flex items-center justify-end gap-3 text-[11px] text-white/35">
-                        <span>{formatTime(message.createdAt)}</span>
-                        {outbound ? <span>{renderStatus(message)}</span> : null}
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[11px] text-white/35">
+                        <div className="flex flex-wrap gap-2">
+                          {outbound ? <button type="button" title="Delete" aria-label="Delete" className="rounded-full px-2 py-1 transition hover:bg-red-500/10 hover:text-red-300 flex items-center justify-center" onClick={() => onDeleteMessage(message.id)}><MdDelete className="w-4 h-4" /></button> : null}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span>{formatTime(message.createdAt)}</span>
+                          {outbound ? <span>{renderStatus(message)}</span> : null}
+                        </div>
                       </div>
 
                       {hoveredMessageId === message.id && (
