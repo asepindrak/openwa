@@ -4,6 +4,9 @@ const { createAvatarDataUrl } = require("../utils/avatar");
 
 let incomingMessageQueue = Promise.resolve();
 
+// Retry operation with exponential backoff for SQLite "database is busy" errors (P1008).
+// This helps handle transient database lock situations that can occur during high concurrency.
+// Retries 4 times with delays: 0ms (immediate), 100ms, 250ms, 500ms before giving up.
 async function retryOnSqliteTimeout(operation) {
   let lastError = null;
   for (const delayMs of [0, 100, 250, 500]) {
