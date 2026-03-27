@@ -2,6 +2,24 @@
 
 This guide covers deploying OpenWA in various environments.
 
+## Quick Start (Global CLI)
+
+### Prerequisites
+- Node.js 20+
+- npm
+
+### Installation
+```bash
+npm i -g @asepindrak/openwa
+```
+
+### Run
+```bash
+openwa
+```
+
+This starts both frontend (port 55111) and backend (port 55222) and automatically opens your browser.
+
 ## Local Development
 
 ### Prerequisites

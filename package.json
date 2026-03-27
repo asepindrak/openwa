@@ -1,12 +1,12 @@
 {
-  "name": "openwa",
+  "name": "@asepindrak/openwa",
   "version": "0.1.0",
   "description": "CLI package for running the self-hosted OpenWA dashboard (Whatsapp Web) locally.",
   "license": "MIT",
   "author": "asepindrak <asepindrakurniawan@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "https://github.com/asepindrak/openwa.git"
+    "url": "git+https://github.com/asepindrak/openwa.git"
   },
   "homepage": "https://github.com/asepindrak/openwa#readme",
   "bugs": {
