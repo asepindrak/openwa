@@ -25,6 +25,7 @@ build
 
 # Storage and sessions (runtime data)
 storage/
+.wwebjs_cache
 
 # Testing
 .pytest_cache
