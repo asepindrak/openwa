@@ -17,14 +17,19 @@ package-lock.json
 *~
 
 # Build artifacts
-.next
-web/.next
 web/out
 dist
 build
 
-# Web source (not needed for global npm installs)
-web/
+# Web source code (exclude source, keep compiled .next)
+web/pages/
+web/components/
+web/lib/
+web/store/
+web/styles/
+web/jsconfig.json
+web/postcss.config.js
+web/tailwind.config.js
 
 
 # Storage and sessions (runtime data)
