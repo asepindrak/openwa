@@ -3,7 +3,7 @@ import { getApiBaseUrl } from "@/lib/api";
 import { MessageActionMenu } from "./MessageActionMenu";
 import { MediaPreviewModal } from "./MediaPreviewModal";
 import { EmojiPicker } from "./EmojiPicker";
-import { SendButtonSpinner } from "./Skeletons";
+import { SendButtonSpinner, MessagesSkeletonList } from "./Skeletons";
 import { MdMoreVert, MdSend, MdEmojiEmotions, MdSearch, MdAdd, MdSettings, MdLogout, MdClose } from "react-icons/md";
 
 function formatTime(value) {
@@ -493,56 +493,65 @@ export const ChatWindow = forwardRef(function ChatWindow({
     }
   }, [searchOpen]);
 
+  // Track when chat is opened to scroll to bottom
   useEffect(() => {
     pendingOpenChatScrollRef.current = true;
+    previousMessagesCountRef.current = 0; // Reset count when chat changes
   }, [chat?.id]);
 
+  // Auto-scroll to bottom when opening a chat or when new messages arrive
   useEffect(() => {
-    if (!chat?.id || !pendingOpenChatScrollRef.current) {
+    if (!chat?.id) {
       return;
     }
 
-    const scrollToBottom = () => {
+    const scrollToBottom = (behavior = "smooth") => {
       if (messagesViewportRef.current) {
         messagesViewportRef.current.scrollTo({
           top: messagesViewportRef.current.scrollHeight,
-          behavior: "smooth"
+          behavior
         });
       }
-      pendingOpenChatScrollRef.current = false;
     };
 
-    if (!messages.length) {
-      if (messagesViewportRef.current) {
-        messagesViewportRef.current.scrollTo({
-          top: messagesViewportRef.current.scrollHeight,
-          behavior: "smooth"
-        });
+    // If opening a new chat, always scroll to bottom
+    if (pendingOpenChatScrollRef.current) {
+      if (!messages.length) {
+        scrollToBottom();
+        pendingOpenChatScrollRef.current = false;
+        return;
       }
-      pendingOpenChatScrollRef.current = false;
-      return;
-    }
 
-    // Detect if this is initial load (message count increased significantly)
-    const isInitialLoad = previousMessagesCountRef.current === 0 && messages.length > 0;
-    previousMessagesCountRef.current = messages.length;
-    
-    // Use longer delay for initial load since DOM needs more time to render many messages
-    const delay = isInitialLoad ? 300 : 100;
-
-    // Wait for DOM to render all messages before scrolling
-    // Use multiple frames and a timeout to ensure layout is complete
-    const timeoutId = setTimeout(() => {
-      requestAnimationFrame(() => {
+      // Use longer delay for initial load since DOM needs more time to render many messages
+      const timeoutId = setTimeout(() => {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            scrollToBottom();
+            requestAnimationFrame(() => {
+              scrollToBottom();
+              pendingOpenChatScrollRef.current = false;
+            });
           });
         });
-      });
-    }, delay);
+      }, 300);
 
-    return () => clearTimeout(timeoutId);
+      return () => clearTimeout(timeoutId);
+    }
+
+    // If new messages arrived (not from loading older messages), scroll to bottom
+    const currentCount = messages.length;
+    const previousCount = previousMessagesCountRef.current;
+    previousMessagesCountRef.current = currentCount;
+
+    // Only auto-scroll if message count increased (new messages arrived, not prepended old ones)
+    // and we're not in the middle of loading older messages
+    if (currentCount > previousCount && !messagesLoading) {
+      const newMessageCount = currentCount - previousCount;
+      // Small delay to ensure DOM is updated
+      const timeoutId = setTimeout(() => {
+        scrollToBottom("smooth");
+      }, 50);
+      return () => clearTimeout(timeoutId);
+    }
   }, [chat?.id, messages.length, messagesLoading]);
 
   if (loading) {
@@ -645,11 +654,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
         </div>
 
         {messagesLoading ? (
-          <div className="mb-4 flex items-center justify-center">
-            <div className="rounded-full bg-[#2e2f2f] px-4 py-2 text-xs font-medium text-white/65">
-              Loading messages...
-            </div>
-          </div>
+          <MessagesSkeletonList />
         ) : null}
 
         <div className="space-y-3">

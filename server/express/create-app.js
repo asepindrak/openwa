@@ -295,7 +295,9 @@ function createApp({ config, sessionManager }) {
 
       res.json(result);
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      res.status(error?.code === "P1008" ? 503 : 400).json({
+        error: error?.code === "P1008" ? "Database is busy. Please try again." : error.message
+      });
     }
   });
 
@@ -304,7 +306,9 @@ function createApp({ config, sessionManager }) {
       const result = await chatService.deleteMessage(req.user.id, req.params.messageId);
       res.json(result);
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      res.status(error?.code === "P1008" ? 503 : 400).json({
+        error: error?.code === "P1008" ? "Database is busy. Please try again." : error.message
+      });
     }
   });
 
@@ -313,7 +317,9 @@ function createApp({ config, sessionManager }) {
       const result = await chatService.forwardMessage(req.user.id, req.params.messageId, req.body.targetChatId);
       res.json(result);
     } catch (error) {
-      res.status(400).json({ error: error.message });
+      res.status(error?.code === "P1008" ? 503 : 400).json({
+        error: error?.code === "P1008" ? "Database is busy. Please try again." : error.message
+      });
     }
   });
 

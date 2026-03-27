@@ -327,62 +327,64 @@ async function createSessionCompanionChat(userId, session) {
 
 async function listChats(userId, sessionId, search) {
   const normalizedSearch = String(search || "").trim();
-  const chats = await prisma.chat.findMany({
-    where: {
-      userId,
-      NOT: {
-        contact: {
-          externalId: {
-            endsWith: "@broadcast"
+  const chats = await retryOnSqliteTimeout(async () => {
+    return prisma.chat.findMany({
+      where: {
+        userId,
+        NOT: {
+          contact: {
+            externalId: {
+              endsWith: "@broadcast"
+            }
           }
-        }
+        },
+        ...(sessionId ? { sessionId } : {}),
+        ...(normalizedSearch
+          ? {
+              OR: [
+                {
+                  title: {
+                    contains: normalizedSearch
+                  }
+                },
+                {
+                  contact: {
+                    displayName: {
+                      contains: normalizedSearch
+                    }
+                  }
+                },
+                {
+                  contact: {
+                    lastMessagePreview: {
+                      contains: normalizedSearch
+                    }
+                  }
+                }
+              ]
+            }
+          : {})
       },
-      ...(sessionId ? { sessionId } : {}),
-      ...(normalizedSearch
-        ? {
-            OR: [
-              {
-                title: {
-                  contains: normalizedSearch
-                }
-              },
-              {
-                contact: {
-                  displayName: {
-                    contains: normalizedSearch
-                  }
-                }
-              },
-              {
-                contact: {
-                  lastMessagePreview: {
-                    contains: normalizedSearch
-                  }
-                }
+      include: {
+        contact: true,
+        messages: {
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          include: {
+            statuses: {
+              orderBy: { createdAt: "asc" }
+            },
+            mediaFile: true,
+            replyTo: {
+              include: {
+                mediaFile: true
               }
-            ]
-          }
-        : {})
-    },
-    include: {
-      contact: true,
-      messages: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        include: {
-          statuses: {
-            orderBy: { createdAt: "asc" }
-          },
-          mediaFile: true,
-          replyTo: {
-            include: {
-              mediaFile: true
             }
           }
         }
-      }
-    },
-    orderBy: { updatedAt: "desc" }
+      },
+      orderBy: { updatedAt: "desc" }
+    });
   });
 
   return sortChatsByRecentActivity(chats.map(mapChat));
@@ -487,9 +489,11 @@ async function touchContactPreview(contactId, preview, unreadDelta = 0) {
 }
 
 async function createOutgoingMessage({ userId, chatId, body, type = "text", mediaFileId = null, replyToId = null }) {
-  const chat = await prisma.chat.findFirst({
-    where: { id: chatId, userId },
-    include: { contact: true }
+  const chat = await retryOnSqliteTimeout(async () => {
+    return prisma.chat.findFirst({
+      where: { id: chatId, userId },
+      include: { contact: true }
+    });
   });
 
   if (!chat) {
@@ -497,11 +501,13 @@ async function createOutgoingMessage({ userId, chatId, body, type = "text", medi
   }
 
   if (replyToId) {
-    const replyToMessage = await prisma.message.findFirst({
-      where: {
-        id: replyToId,
-        chatId: chat.id
-      }
+    const replyToMessage = await retryOnSqliteTimeout(async () => {
+      return prisma.message.findFirst({
+        where: {
+          id: replyToId,
+          chatId: chat.id
+        }
+      });
     });
 
     if (!replyToMessage) {
@@ -509,37 +515,41 @@ async function createOutgoingMessage({ userId, chatId, body, type = "text", medi
     }
   }
 
-  const message = await prisma.message.create({
-    data: {
-      chatId: chat.id,
-      sessionId: chat.sessionId,
-      mediaFileId,
-      replyToId,
-      sender: `user:${userId}`,
-      receiver: chat.contact.externalId,
-      body: body || null,
-      type,
-      direction: "outbound",
-      statuses: {
-        create: [{ status: "sent" }]
-      }
-    },
-    include: {
-      statuses: {
-        orderBy: { createdAt: "asc" }
+  const message = await retryOnSqliteTimeout(async () => {
+    return prisma.message.create({
+      data: {
+        chatId: chat.id,
+        sessionId: chat.sessionId,
+        mediaFileId,
+        replyToId,
+        sender: `user:${userId}`,
+        receiver: chat.contact.externalId,
+        body: body || null,
+        type,
+        direction: "outbound",
+        statuses: {
+          create: [{ status: "sent" }]
+        }
       },
-      mediaFile: true,
-      replyTo: {
-        include: {
-          mediaFile: true
+      include: {
+        statuses: {
+          orderBy: { createdAt: "asc" }
+        },
+        mediaFile: true,
+        replyTo: {
+          include: {
+            mediaFile: true
+          }
         }
       }
-    }
+    });
   });
 
-  await prisma.chat.update({
-    where: { id: chat.id },
-    data: { updatedAt: new Date() }
+  await retryOnSqliteTimeout(async () => {
+    return prisma.chat.update({
+      where: { id: chat.id },
+      data: { updatedAt: new Date() }
+    });
   });
   await touchContactPreview(chat.contactId, sanitizedPreview(body, type), 0);
 
@@ -889,50 +899,58 @@ async function markChatOpened(userId, chatId) {
 }
 
 async function deleteMessage(userId, messageId) {
-  const message = await prisma.message.findFirst({
-    where: {
-      id: messageId,
-      sender: `user:${userId}`
-    },
-    include: {
-      chat: true
-    }
+  const message = await retryOnSqliteTimeout(async () => {
+    return prisma.message.findFirst({
+      where: {
+        id: messageId,
+        sender: `user:${userId}`
+      },
+      include: {
+        chat: true
+      }
+    });
   });
 
   if (!message) {
     throw new Error("Message not found or cannot be deleted.");
   }
 
-  const updatedMessage = await prisma.message.update({
-    where: { id: message.id },
-    data: {
-      body: "Pesan dihapus",
-      mediaFileId: null
-    },
-    include: {
-      statuses: {
-        orderBy: { createdAt: "asc" }
+  const updatedMessage = await retryOnSqliteTimeout(async () => {
+    return prisma.message.update({
+      where: { id: message.id },
+      data: {
+        body: "Pesan dihapus",
+        mediaFileId: null
       },
-      mediaFile: true,
-      replyTo: {
-        include: {
-          mediaFile: true
+      include: {
+        statuses: {
+          orderBy: { createdAt: "asc" }
+        },
+        mediaFile: true,
+        replyTo: {
+          include: {
+            mediaFile: true
+          }
         }
       }
-    }
+    });
   });
 
-  const latestMessage = await prisma.message.findFirst({
-    where: { chatId: message.chatId },
-    orderBy: { createdAt: "desc" }
+  const latestMessage = await retryOnSqliteTimeout(async () => {
+    return prisma.message.findFirst({
+      where: { chatId: message.chatId },
+      orderBy: { createdAt: "desc" }
+    });
   });
 
-  await prisma.contact.update({
-    where: { id: message.chat.contactId },
-    data: {
-      lastMessagePreview: latestMessage ? sanitizedPreview(latestMessage.body, latestMessage.type) : "Belum ada pesan",
-      lastMessageAt: latestMessage?.createdAt || null
-    }
+  await retryOnSqliteTimeout(async () => {
+    return prisma.contact.update({
+      where: { id: message.chat.contactId },
+      data: {
+        lastMessagePreview: latestMessage ? sanitizedPreview(latestMessage.body, latestMessage.type) : "Belum ada pesan",
+        lastMessageAt: latestMessage?.createdAt || null
+      }
+    });
   });
 
   return {
@@ -942,21 +960,23 @@ async function deleteMessage(userId, messageId) {
 }
 
 async function forwardMessage(userId, messageId, targetChatId) {
-  const sourceMessage = await prisma.message.findFirst({
-    where: {
-      id: messageId,
-      chat: {
-        userId
-      }
-    },
-    include: {
-      mediaFile: true,
-      replyTo: {
-        include: {
-          mediaFile: true
+  const sourceMessage = await retryOnSqliteTimeout(async () => {
+    return prisma.message.findFirst({
+      where: {
+        id: messageId,
+        chat: {
+          userId
+        }
+      },
+      include: {
+        mediaFile: true,
+        replyTo: {
+          include: {
+            mediaFile: true
+          }
         }
       }
-    }
+    });
   });
 
   if (!sourceMessage) {
