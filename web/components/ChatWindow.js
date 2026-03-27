@@ -4,6 +4,7 @@ import { MessageActionMenu } from "./MessageActionMenu";
 import { MediaPreviewModal } from "./MediaPreviewModal";
 import { EmojiPicker } from "./EmojiPicker";
 import { SendButtonSpinner } from "./Skeletons";
+import { MdMoreVert, MdSend, MdEmojiEmotions, MdSearch, MdAdd, MdSettings, MdLogout, MdClose } from "react-icons/md";
 
 function formatTime(value) {
   if (!value) {
@@ -620,14 +621,14 @@ export const ChatWindow = forwardRef(function ChatWindow({
                   setSearchOpen(false);
                 }}
               >
-                ×
+                <MdClose className="w-4 h-4" />
               </button>
             </div>
           ) : null}
-          <button type="button" title="Search" aria-label="Search" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={() => setSearchOpen(true)}>⌕</button>
-          <button type="button" title="New chat" aria-label="New chat" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-lg leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onOpenContacts}><span className="-mt-px">+</span></button>
-          <button type="button" title="Settings" aria-label="Settings" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onOpenSettings}>⚙</button>
-          <button type="button" title="Logout" aria-label="Logout" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onLogout}>⎋</button>
+          <button type="button" title="Search" aria-label="Search" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={() => setSearchOpen(true)}><MdSearch className="w-5 h-5" /></button>
+          <button type="button" title="New chat" aria-label="New chat" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-lg leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onOpenContacts}><MdAdd className="w-5 h-5" /></button>
+          <button type="button" title="Settings" aria-label="Settings" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onOpenSettings}><MdSettings className="w-5 h-5" /></button>
+          <button type="button" title="Logout" aria-label="Logout" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onLogout}><MdLogout className="w-5 h-5" /></button>
         </div>
       </header>
 
@@ -712,27 +713,9 @@ export const ChatWindow = forwardRef(function ChatWindow({
                       {renderMediaPreviewWithCallback(message, (media) => setSelectedMediaModal(media))}
                       {message.body ? <p className="whitespace-pre-wrap text-sm leading-6 text-white/88">{message.body}</p> : null}
 
-                      <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[11px] text-white/35">
-                        <div className="flex flex-wrap gap-2">
-                          <button type="button" title="Reply" aria-label="Reply" className="rounded-full px-2 py-1 transition hover:bg-white/[0.06] hover:text-white" onClick={() => setReplyTo(message)}>↩</button>
-                          {outbound ? <button type="button" title="Delete" aria-label="Delete" className="rounded-full px-2 py-1 transition hover:bg-red-500/10 hover:text-red-300" onClick={() => onDeleteMessage(message.id)}>🗑</button> : null}
-                          <button
-                            type="button"
-                            title="Forward"
-                            aria-label="Forward"
-                            className="rounded-full px-2 py-1 transition hover:bg-white/[0.06] hover:text-white"
-                            onClick={() => {
-                              setForwardingMessageId((current) => (current === message.id ? null : message.id));
-                              setForwardTargetChatId("");
-                            }}
-                          >
-                            ↪
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span>{formatTime(message.createdAt)}</span>
-                          {outbound ? <span>{renderStatus(message)}</span> : null}
-                        </div>
+                      <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-white/35">
+                        <span>{formatTime(message.createdAt)}</span>
+                        {outbound ? <span>{renderStatus(message)}</span> : null}
                       </div>
 
                       {hoveredMessageId === message.id && (
@@ -744,7 +727,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
                             onClick={() => setActiveMenuMessageId((current) => (current === message.id ? null : message.id))}
                             title="More options"
                           >
-                            ⋮
+                            <MdMoreVert className="w-5 h-5" />
                           </button>
                           <MessageActionMenu
                             isOpen={activeMenuMessageId === message.id}
@@ -796,7 +779,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
               <p className="text-xs uppercase tracking-[0.22em] text-brand-100">Reply</p>
               <p className="mt-1 truncate text-sm text-white/55">{previewReply(replyTo)}</p>
             </div>
-            <button type="button" className="text-sm text-white/45 hover:text-white" onClick={() => setReplyTo(null)}>×</button>
+            <button type="button" className="text-sm text-white/45 hover:text-white" onClick={() => setReplyTo(null)}><MdClose className="w-4 h-4" /></button>
           </div>
         ) : null}
 
@@ -818,7 +801,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
                   onClick={() => removePendingFile(index)}
                   className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-xs text-white transition hover:bg-red-600"
                 >
-                  ×
+                  <MdClose className="w-4 h-4" />
                 </button>
               </div>
             ))}
@@ -827,7 +810,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
 
         <div className="flex items-center gap-2 relative">
           <label className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#2e2f2f] text-[24px] leading-none text-white/60 transition hover:bg-[#3a3b3b] hover:text-white">
-            <span className="-mt-px">+</span>
+            <MdAdd className="w-5 h-5" />
             <input ref={fileInputRef} type="file" className="hidden" onChange={handleFile} multiple accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" />
           </label>
           <button
@@ -837,7 +820,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
             onClick={() => setEmojiPickerOpen(!emojiPickerOpen)}
             title="Emoji"
           >
-            😊
+            <MdEmojiEmotions className="w-5 h-5" />
           </button>
           {emojiPickerOpen && (
             <div className="absolute bottom-full left-0 z-50">
@@ -872,7 +855,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
             />
           </div>
           <button type="submit" className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-500 text-sm font-semibold leading-none text-[#10251a] transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60" disabled={busy || uploading}>
-            {busy || uploading ? <SendButtonSpinner /> : "➤"}
+            {busy || uploading ? <SendButtonSpinner /> : <MdSend className="w-5 h-5" />}
           </button>
         </div>
       </form>

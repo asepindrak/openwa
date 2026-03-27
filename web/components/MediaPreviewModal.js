@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MdClose, MdDownload, MdAdd, MdRemove } from "react-icons/md";
 
 export function MediaPreviewModal({ media, onClose }) {
   const [zoom, setZoom] = useState(1);
@@ -62,20 +63,21 @@ export function MediaPreviewModal({ media, onClose }) {
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-6 top-6 z-10 rounded-full bg-black/60 w-10 h-10 flex items-center justify-center transition hover:bg-black/80 text-white text-lg"
+          className="absolute right-6 top-6 z-10 rounded-full bg-black/60 w-10 h-10 flex items-center justify-center transition hover:bg-black/80 text-white"
           title="Close (Esc)"
         >
-          ✕
+          <MdClose className="w-5 h-5" />
         </button>
 
         {/* Download button */}
         <button
           type="button"
           onClick={handleDownload}
-          className="absolute bottom-6 right-6 z-10 rounded-lg bg-black/60 px-4 py-2 text-sm font-medium text-white transition hover:bg-black/80"
+          className="absolute bottom-6 right-6 z-10 rounded-lg bg-black/60 px-4 py-2 text-sm font-medium text-white transition hover:bg-black/80 flex items-center gap-2"
           title="Download"
         >
-          ⬇ Download
+          <MdDownload className="w-4 h-4" />
+          Download
         </button>
 
         {/* Media content */}
@@ -111,10 +113,10 @@ export function MediaPreviewModal({ media, onClose }) {
             <button
               type="button"
               onClick={() => setZoom((current) => Math.max(current - 0.2, 0.5))}
-              className="rounded p-1 transition hover:bg-black/80 text-white"
-              title="Zoom out (-)  "
+              className="rounded p-1 transition hover:bg-black/80 text-white flex items-center justify-center"
+              title="Zoom out"
             >
-              −
+              <MdRemove className="w-4 h-4" />
             </button>
             <span className="min-w-[40px] text-center text-sm text-white">
               {Math.round(zoom * 100)}%
@@ -122,10 +124,10 @@ export function MediaPreviewModal({ media, onClose }) {
             <button
               type="button"
               onClick={() => setZoom((current) => Math.min(current + 0.2, 3))}
-              className="rounded p-1 transition hover:bg-black/80 text-white"
-              title="Zoom in (+)"
+              className="rounded p-1 transition hover:bg-black/80 text-white flex items-center justify-center"
+              title="Zoom in"
             >
-              +
+              <MdAdd className="w-4 h-4" />
             </button>
             <div className="h-4 w-px bg-white/20" />
             <button

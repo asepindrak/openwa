@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { MdClose } from "react-icons/md";
 
 const EMOJI_CATEGORIES = {
   smileys: {
@@ -68,7 +69,7 @@ export function EmojiPicker({ isOpen, onClose, onEmojiSelect, triggerRef }) {
           className="flex h-6 w-6 items-center justify-center rounded-full text-white/60 transition hover:bg-white/10 hover:text-white"
           title="Close emoji picker"
         >
-          ✕
+          <MdClose className="w-4 h-4" />
         </button>
       </div>
 

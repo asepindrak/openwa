@@ -1,3 +1,5 @@
+import { MdClose } from "react-icons/md";
+
 function formatSubtitle(contact) {
   if (contact.lastMessagePreview) {
     return contact.lastMessagePreview;
@@ -42,7 +44,7 @@ export function ContactsPanel({ contacts, loading, open, query, onQueryChange, o
               <h2 className="mt-2 text-lg font-semibold text-white">Start new message</h2>
             </div>
             <button type="button" className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2e2f2f] text-xs leading-none text-white/60 transition hover:bg-[#3a3b3b] hover:text-white" onClick={onClose} title="Close contacts" aria-label="Close contacts">
-              ×
+              <MdClose className="w-4 h-4" />
             </button>
           </div>
           <div className="mt-4 rounded-[22px] bg-[#2e2f2f] px-3 py-2">

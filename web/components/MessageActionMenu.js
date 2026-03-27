@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { MdReply, MdDelete, MdShare } from "react-icons/md";
 
 export function MessageActionMenu({ 
   isOpen, 
@@ -119,7 +120,7 @@ export function MessageActionMenu({
           }}
           className="flex w-full items-center gap-3 px-4 py-3 text-sm text-white/80 transition hover:bg-white/5 hover:text-white"
         >
-          <span>↩</span>
+          <span><MdReply className="w-4 h-4" /></span>
           <span>Reply</span>
         </button>
 
@@ -132,7 +133,7 @@ export function MessageActionMenu({
             }}
             className="flex w-full items-center gap-3 px-4 py-3 text-sm text-white/80 transition hover:bg-red-500/10 hover:text-red-300"
           >
-            <span>🗑</span>
+            <span><MdDelete className="w-4 h-4" /></span>
             <span>Delete</span>
           </button>
         )}
@@ -145,7 +146,7 @@ export function MessageActionMenu({
           }}
           className="flex w-full items-center gap-3 px-4 py-3 text-sm text-white/80 transition hover:bg-white/5 hover:text-white"
         >
-          <span>↪</span>
+          <span><MdShare className="w-4 h-4" /></span>
           <span>Forward</span>
         </button>
       </div>
