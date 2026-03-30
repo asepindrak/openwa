@@ -7,6 +7,8 @@ import {
   useState,
 } from "react";
 import { getApiBaseUrl } from "@/lib/api";
+import { useAppStore } from "@/store/useAppStore";
+import { ChatProfileModal } from "@/components/ChatProfileModal";
 import { MessageActionMenu } from "./MessageActionMenu";
 import { MediaPreviewModal } from "./MediaPreviewModal";
 import { EmojiPicker } from "./EmojiPicker";
@@ -378,6 +380,8 @@ export const ChatWindow = forwardRef(function ChatWindow(
   const [selectedMediaModal, setSelectedMediaModal] = useState(null);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [pendingFiles, setPendingFiles] = useState([]);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [confirmingScanMap, setConfirmingScanMap] = useState({});
   const composerRef = useRef(null);
   const searchInputRef = useRef(null);
   const messagesViewportRef = useRef(null);
@@ -512,6 +516,36 @@ export const ChatWindow = forwardRef(function ChatWindow(
     } finally {
       setBusy(false);
       setUploading(false);
+    }
+  };
+
+  const token = useAppStore((s) => s.token);
+  const setActiveChat = useAppStore((s) => s.setActiveChat);
+  const upsertChat = useAppStore((s) => s.upsertChat);
+  const [creatingAssistant, setCreatingAssistant] = useState(false);
+
+  const handleConfirmScan = async (sessionId, messageId) => {
+    if (!token) return alert("Not authenticated");
+    setConfirmingScanMap((m) => ({ ...m, [messageId]: true }));
+    try {
+      const res = await fetch(
+        `${getApiBaseUrl()}/api/sessions/${sessionId}/confirm-scan`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Request failed");
+      // Optionally notify user
+      alert("Scan confirmed; waiting for device to connect.");
+    } catch (err) {
+      alert(err.message || "Failed to confirm scan");
+    } finally {
+      setConfirmingScanMap((m) => ({ ...m, [messageId]: false }));
     }
   };
 
@@ -695,7 +729,10 @@ export const ChatWindow = forwardRef(function ChatWindow(
   return (
     <section className="flex min-w-0 flex-1 flex-col bg-[#161717] text-white">
       <header className="flex h-[78px] shrink-0 items-center justify-between gap-4 bg-[#161717] px-6 py-3">
-        <div className="flex min-w-0 items-center gap-3">
+        <div
+          className="flex min-w-0 items-center gap-3 cursor-pointer"
+          onClick={() => setProfileOpen(true)}
+        >
           <ChatAvatar
             src={chat.contact.avatarUrl}
             label={chat.contact.displayName}
@@ -783,6 +820,44 @@ export const ChatWindow = forwardRef(function ChatWindow(
           </button>
           <button
             type="button"
+            title="New Assistant"
+            aria-label="New Assistant"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-sm leading-none text-white transition hover:bg-[#3a3b3b]"
+            onClick={async () => {
+              if (!token) return alert("Not authenticated");
+              if (!confirm("Start a new Assistant conversation?")) return;
+              setCreatingAssistant(true);
+              try {
+                const res = await fetch(
+                  `${getApiBaseUrl()}/api/assistant/sessions`,
+                  {
+                    method: "POST",
+                    headers: {
+                      Authorization: `Bearer ${token}`,
+                      "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({}),
+                  },
+                );
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || "Request failed");
+                const chat = data.chat;
+                if (chat && chat.id) {
+                  upsertChat(chat);
+                  setActiveChat(chat.id);
+                }
+              } catch (err) {
+                alert(err.message || "Failed to create assistant session");
+              } finally {
+                setCreatingAssistant(false);
+              }
+            }}
+            disabled={creatingAssistant}
+          >
+            {creatingAssistant ? "..." : "AI"}
+          </button>
+          <button
+            type="button"
             title="Settings"
             aria-label="Settings"
             className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]"
@@ -801,6 +876,12 @@ export const ChatWindow = forwardRef(function ChatWindow(
           </button>
         </div>
       </header>
+
+      <ChatProfileModal
+        open={profileOpen}
+        chat={chat}
+        onClose={() => setProfileOpen(false)}
+      />
 
       <div
         ref={messagesViewportRef}
@@ -913,6 +994,33 @@ export const ChatWindow = forwardRef(function ChatWindow(
                       {message.mediaFile &&
                         renderMediaPreviewWithCallback(message, (media) =>
                           setSelectedMediaModal(media),
+                        )}
+                      {/* If this is a session assistant QR image, offer a "I scanned this QR" button */}
+                      {message.mediaFile &&
+                        message.sender &&
+                        String(message.sender).startsWith("session:") &&
+                        String(message.sender).endsWith(":assistant") &&
+                        (message.type === "image" ||
+                          String(message.mediaFile.mimeType || "").startsWith(
+                            "image/",
+                          )) && (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              className="rounded-2xl bg-brand-500 px-3 py-2 text-sm font-semibold text-[#10251a]"
+                              onClick={() => {
+                                const parts = String(message.sender).split(":");
+                                const sessionId = parts[1] || null;
+                                if (!sessionId) return;
+                                handleConfirmScan(sessionId, message.id);
+                              }}
+                              disabled={Boolean(confirmingScanMap[message.id])}
+                            >
+                              {confirmingScanMap[message.id]
+                                ? "Confirming..."
+                                : "I scanned this QR"}
+                            </button>
+                          </div>
                         )}
                       {message.body ? (
                         <p className="whitespace-pre-wrap text-sm leading-6 text-white/88">

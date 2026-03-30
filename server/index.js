@@ -122,6 +122,9 @@ async function startOpenWA({ dev = false } = {}) {
     },
   });
 
+  // make io available to express routes via req.app.get('io')
+  app.set("io", io);
+
   sessionManager.on("session-status", (payload) => {
     io.to(userRoom(payload.userId)).emit("session_status_update", payload);
   });

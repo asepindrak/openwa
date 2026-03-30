@@ -1,7 +1,12 @@
 const EventEmitter = require("events");
 const QRCode = require("qrcode");
 const path = require("path");
-const { sessionsDir, rootDir } = require("../../utils/paths");
+const {
+  sessionsDir,
+  storageDir,
+  mediaDir,
+  ensureRuntimeDirs,
+} = require("../../utils/paths");
 
 class WwebjsAdapter extends EventEmitter {
   constructor({ session }) {
@@ -117,6 +122,10 @@ class WwebjsAdapter extends EventEmitter {
   async connect() {
     const { Client, LocalAuth } = require("whatsapp-web.js");
 
+    try {
+      ensureRuntimeDirs();
+    } catch (e) {}
+
     this.client = new Client({
       authStrategy: new LocalAuth({
         clientId: this.session.id,
@@ -129,6 +138,8 @@ class WwebjsAdapter extends EventEmitter {
         protocolTimeout: 120000,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
         timeout: 0,
+        // store puppeteer profile/cache in the user data dir under storage
+        userDataDir: path.join(storageDir, ".wwebjs_cache"),
       },
     });
 
@@ -165,7 +176,8 @@ class WwebjsAdapter extends EventEmitter {
     const { v4: uuidv4 } = require("uuid");
     const { storeIncomingMessage } = require("../../services/chat-service");
     const { prisma } = require("../../database/client");
-    const mediaDir = path.join(rootDir, "storage", "media");
+    // use mediaDir from paths so it's stored in the user data dir
+    // (imported at top of file)
 
     this.client.on("message", (message) => {
       void (async () => {
@@ -316,7 +328,7 @@ class WwebjsAdapter extends EventEmitter {
 
     if (payload.mediaFileId) {
       const { MessageMedia } = require("whatsapp-web.js");
-      const mediaPath = path.join(rootDir, "storage", payload.mediaPath || "");
+      const mediaPath = path.join(mediaDir, payload.mediaPath || "");
 
       const media = MessageMedia.fromFilePath(mediaPath);
       const response = await this.client.sendMessage(

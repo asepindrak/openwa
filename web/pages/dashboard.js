@@ -297,6 +297,20 @@ export default function DashboardPage() {
     }
   };
 
+  const handleTogglePin = async (chatId, isPinned) => {
+    setError("");
+    try {
+      if (!token) return;
+      await apiFetch(`/api/chats/${chatId}/${isPinned ? "unpin" : "pin"}`, {
+        method: "POST",
+        token,
+      });
+      await loadWorkspace();
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
   const handleConnectSession = async (sessionId) => {
     setError("");
     setConnectLoading(sessionId);

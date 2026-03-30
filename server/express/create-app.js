@@ -11,8 +11,14 @@ const {
 } = require("../services/auth-service");
 const apiKeyService = require("../services/api-key-service");
 const chatService = require("../services/chat-service");
+const assistantService = require("../services/assistant-service");
 const sessionService = require("../services/session-service");
 const webhookService = require("../services/webhook-service");
+const aiProviderService = require("../services/ai-provider-service");
+const llmService = require("../services/llm-service");
+const agentService = require("../services/agent-service");
+const terminalService = require("../services/terminal-service");
+const toolCredentialService = require("../services/tool-credential-service");
 const {
   createAgentReadme,
   createOpenApiDocument,
@@ -297,6 +303,287 @@ function createApp({ config, sessionManager }) {
     }),
   );
 
+  // AI Provider management (dashboard-only)
+  app.get(
+    "/api/ai-providers",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const providers = await aiProviderService.listProviders(req.user.id);
+      res.json({ providers });
+    }),
+  );
+
+  app.post(
+    "/api/ai-providers",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const { provider, name, config } = req.body || {};
+      const created = await aiProviderService.createProvider(req.user.id, {
+        provider,
+        name,
+        config,
+      });
+      res.status(201).json({ provider: created });
+    }),
+  );
+
+  app.get(
+    "/api/ai-providers/:providerId",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const provider = await aiProviderService.getProvider(
+        req.user.id,
+        req.params.providerId,
+      );
+      if (!provider) return res.status(404).json({ error: "Not found" });
+      res.json({ provider });
+    }),
+  );
+
+  app.put(
+    "/api/ai-providers/:providerId",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const updated = await aiProviderService.updateProvider(
+        req.user.id,
+        req.params.providerId,
+        req.body || {},
+      );
+      res.json({ provider: updated });
+    }),
+  );
+
+  app.delete(
+    "/api/ai-providers/:providerId",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      await aiProviderService.deleteProvider(
+        req.user.id,
+        req.params.providerId,
+      );
+      res.json({ ok: true });
+    }),
+  );
+
+  app.get(
+    "/api/ai-providers/:providerId/models",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const models = await aiProviderService.fetchModels(
+        req.user.id,
+        req.params.providerId,
+      );
+      res.json({ models });
+    }),
+  );
+
+  // Assistant profile (dashboard)
+  app.get(
+    "/api/assistant",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const assistant = await assistantService.getAssistant(req.user.id);
+      res.json({ assistant });
+    }),
+  );
+
+  // Create a new Assistant conversation (fresh chat)
+  app.post(
+    "/api/assistant/sessions",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const title = req.body?.title;
+      const chat = await chatService.createAssistantConversation(req.user.id, {
+        title,
+      });
+      res.status(201).json({ chat });
+    }),
+  );
+
+  app.put(
+    "/api/assistant",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const { displayName, avatarUrl, persona } = req.body || {};
+      const assistant = await assistantService.updateAssistant(req.user.id, {
+        displayName,
+        avatarUrl,
+        persona,
+      });
+      res.json({ assistant });
+    }),
+  );
+
+  // Agent tools: read & update TOOLS.md
+  app.get(
+    "/api/agent/tools",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const content = await agentService.readToolsFile();
+      res.json({ content });
+    }),
+  );
+
+  app.put(
+    "/api/agent/tools",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const { action, content } = req.body || {};
+      await agentService.updateToolsFile({
+        action: action || "append",
+        content: content || "",
+      });
+      res.json({ ok: true });
+    }),
+  );
+
+  // Register an external tool manifest (validate + append + registry)
+  app.post(
+    "/api/agent/register-tool",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const manifest = req.body?.manifest || req.body || {};
+      const overwrite = Boolean(req.body?.overwrite);
+      const result = await agentService.registerExternalTool(
+        req.user.id,
+        manifest,
+        { overwrite },
+      );
+      // If caller provided apiKey/headerName in request body, persist credential for the registering user
+      try {
+        const apiKey = req.body?.apiKey || null;
+        const headerName = req.body?.headerName || "Authorization";
+        if (apiKey && result && result.tool && result.tool.id) {
+          await toolCredentialService.saveCredential(
+            req.user.id,
+            result.tool.id,
+            { apiKey, headerName },
+          );
+          result.credentialSaved = true;
+        }
+      } catch (e) {
+        // don't fail registration on credential storage error; annotate result
+        result.credentialSaved = false;
+        result.credentialError = e && e.message ? e.message : String(e);
+      }
+      res.json(result);
+    }),
+  );
+
+  // Register a tool by fetching a manifest from a URL (supports optional API key header)
+  app.post(
+    "/api/agent/register-tool-url",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const { url, apiKey, headerName, overwrite } = req.body || {};
+      if (!url) return res.status(400).json({ error: "url is required" });
+      const result = await agentService.fetchAndRegisterTool(req.user.id, {
+        url,
+        apiKey,
+        headerName,
+        overwrite,
+      });
+      res.json(result);
+    }),
+  );
+
+  // Credential management for registered tools (per-user)
+  app.post(
+    "/api/agent/tools/:id/credential",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const toolId = req.params.id;
+      const { apiKey, headerName } = req.body || {};
+      if (!apiKey) return res.status(400).json({ error: "apiKey is required" });
+      try {
+        const result = await toolCredentialService.saveCredential(
+          req.user.id,
+          toolId,
+          { apiKey, headerName },
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    }),
+  );
+
+  app.get(
+    "/api/agent/tools/:id/credential",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const toolId = req.params.id;
+      const cred = await toolCredentialService.getCredentialForUser(
+        req.user.id,
+        toolId,
+      );
+      res.json({
+        ok: true,
+        hasCredential: !!cred,
+        addedAt: cred ? cred.addedAt : null,
+      });
+    }),
+  );
+
+  app.delete(
+    "/api/agent/tools/:id/credential",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const toolId = req.params.id;
+      try {
+        const result = await toolCredentialService.removeCredentialForUser(
+          req.user.id,
+          toolId,
+        );
+        res.json(result);
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    }),
+  );
+
+  // Invoke a registered tool by id (authenticated)
+  app.post(
+    "/api/agent/invoke-tool/:id",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const id = req.params.id;
+      const body = req.body || {};
+      try {
+        const result = await agentService.invokeRegisteredTool(
+          req.user.id,
+          id,
+          body,
+          { config },
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        res.status(400).json({ error: err.message });
+      }
+    }),
+  );
+
+  // LLM generation endpoints - use configured providers
+  app.post(
+    "/api/ai/generate",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const params = req.body || {};
+      const result = await llmService.generate(req.user.id, params);
+      res.json({ result });
+    }),
+  );
+
+  app.post(
+    "/api/ai-providers/:providerId/generate",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const params = { ...(req.body || {}), providerId: req.params.providerId };
+      const result = await llmService.generate(req.user.id, params);
+      res.json({ result });
+    }),
+  );
+
   app.get("/api/bootstrap", requireAuth, async (req, res) => {
     try {
       await chatService.ensureWelcomeWorkspace(req.user.id);
@@ -367,6 +654,137 @@ function createApp({ config, sessionManager }) {
     },
   );
 
+  // Client confirms they scanned the QR shown in chat. This will (re)attempt connect.
+  app.post(
+    "/api/sessions/:sessionId/confirm-scan",
+    requireAuth,
+    async (req, res) => {
+      try {
+        await sessionManager.connectSession(req.user.id, req.params.sessionId, {
+          force: false,
+        });
+        const session = await sessionService.getSessionById(
+          req.user.id,
+          req.params.sessionId,
+        );
+        res.json({ session });
+      } catch (error) {
+        res.status(400).json({ error: error.message });
+      }
+    },
+  );
+
+  // Terminal execution (auto/manual approval)
+  app.post(
+    "/api/terminal/execute",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const { command, approvalMode, timeout } = req.body || {};
+      if (!command)
+        return res.status(400).json({ error: "command is required" });
+      const io = req.app.get("io");
+      const result = await terminalService.requestExecution(
+        req.user.id,
+        { command, approvalMode, timeout },
+        io,
+      );
+      res.json(result);
+    }),
+  );
+
+  // Terminal history for the authenticated user
+  app.get(
+    "/api/terminal/history",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const limit = req.query.limit || 50;
+      const items = await terminalService.listHistory(req.user.id, limit);
+      res.json({ items });
+    }),
+  );
+
+  app.get(
+    "/api/terminal/:id",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const id = req.params.id;
+      const rec = await terminalService.getRequestById(id);
+      if (!rec) return res.status(404).json({ error: "Not found" });
+      if (rec.userId !== req.user.id)
+        return res.status(403).json({ error: "Forbidden" });
+      res.json({ item: rec });
+    }),
+  );
+
+  // Rerun a previous command: creates a new execution request using the same command
+  app.post(
+    "/api/terminal/:id/rerun",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const id = req.params.id;
+      const rec = await terminalService.getRequestById(id);
+      if (!rec) return res.status(404).json({ error: "Not found" });
+      if (rec.userId !== req.user.id)
+        return res.status(403).json({ error: "Forbidden" });
+
+      const { approvalMode, timeout } = req.body || {};
+      const io = req.app.get("io");
+
+      const result = await terminalService.requestExecution(
+        req.user.id,
+        {
+          command: rec.command,
+          approvalMode: approvalMode || rec.approvalMode || "manual",
+          timeout: timeout || undefined,
+        },
+        io,
+      );
+
+      res.json(result);
+    }),
+  );
+
+  app.get(
+    "/api/terminal/pending",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const items = await terminalService.listPendingRequests(req.user.id);
+      res.json({ items });
+    }),
+  );
+
+  app.post(
+    "/api/terminal/:id/approve",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const id = req.params.id;
+      const io = req.app.get("io");
+      const result = await terminalService.approveRequest(
+        req.user.id,
+        id,
+        true,
+        io,
+      );
+      res.json({ ok: true, result });
+    }),
+  );
+
+  app.post(
+    "/api/terminal/:id/deny",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const id = req.params.id;
+      const io = req.app.get("io");
+      const result = await terminalService.approveRequest(
+        req.user.id,
+        id,
+        false,
+        io,
+      );
+      res.json({ ok: true, result });
+    }),
+  );
+
   app.post(
     "/api/sessions/:sessionId/disconnect",
     requireAuth,
@@ -399,6 +817,28 @@ function createApp({ config, sessionManager }) {
       res.json({ chats });
     }),
   );
+
+  app.post("/api/chats/:chatId/pin", requireAuth, async (req, res) => {
+    try {
+      const chat = await chatService.pinChat(req.user.id, req.params.chatId);
+      res.json({ chat });
+    } catch (error) {
+      res.status(error?.code === "P1008" ? 503 : 400).json({
+        error: error.message,
+      });
+    }
+  });
+
+  app.post("/api/chats/:chatId/unpin", requireAuth, async (req, res) => {
+    try {
+      const chat = await chatService.unpinChat(req.user.id, req.params.chatId);
+      res.json({ chat });
+    } catch (error) {
+      res.status(error?.code === "P1008" ? 503 : 400).json({
+        error: error.message,
+      });
+    }
+  });
 
   app.get(
     "/api/contacts",

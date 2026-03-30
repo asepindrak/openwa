@@ -27,35 +27,61 @@ function registerSocketHandlers({ io, config, sessionManager }) {
 
     socket.on("send_message", async (payload = {}, ack) => {
       try {
-        const result = await chatService.createOutgoingMessage({
-          userId: socket.user.id,
-          chatId: payload.chatId,
-          body: payload.body,
-          type: payload.type || "text",
-          mediaFileId: payload.mediaFileId || null,
-          replyToId: payload.replyToId || null
-        });
+        // If this is an assistant chat, route to agent service
+        const agentService = require("../services/agent-service");
+        const chat = await chatService.getChatWithContact(
+          socket.user.id,
+          payload.chatId,
+        );
+        const externalId = chat?.contact?.externalId || null;
 
-        io.to(userRoom(socket.user.id)).emit("new_message", result.message);
-        io.to(userRoom(socket.user.id)).emit("contact_list_update", result.chat);
-
-        if (result.message.sessionId) {
-          await sessionManager.sendMessage(result.message.sessionId, {
-            recipient: result.message.receiver,
-            body: result.message.body,
-            mediaFileId: result.message.mediaFileId,
-            mediaPath: result.message.mediaFile?.relativePath || null
+        if (
+          externalId &&
+          (externalId === "openwa:assistant" ||
+            String(externalId).endsWith(":assistant"))
+        ) {
+          // store outgoing message and let agent handle reply
+          await agentService.handleAssistantMessage(
+            socket.user.id,
+            payload.chatId,
+            payload.body,
+            { config, io, socket, sessionManager },
+          );
+          if (ack) ack({ ok: true });
+        } else {
+          const result = await chatService.createOutgoingMessage({
+            userId: socket.user.id,
+            chatId: payload.chatId,
+            body: payload.body,
+            type: payload.type || "text",
+            mediaFileId: payload.mediaFileId || null,
+            replyToId: payload.replyToId || null,
           });
 
-          await chatService.addMessageStatus(result.message.id, "delivered");
-          io.to(userRoom(socket.user.id)).emit("message_status_update", {
-            messageId: result.message.id,
-            status: "delivered"
-          });
-        }
+          io.to(userRoom(socket.user.id)).emit("new_message", result.message);
+          io.to(userRoom(socket.user.id)).emit(
+            "contact_list_update",
+            result.chat,
+          );
 
-        if (ack) {
-          ack({ ok: true, message: result.message });
+          if (result.message.sessionId) {
+            await sessionManager.sendMessage(result.message.sessionId, {
+              recipient: result.message.receiver,
+              body: result.message.body,
+              mediaFileId: result.message.mediaFileId,
+              mediaPath: result.message.mediaFile?.relativePath || null,
+            });
+
+            await chatService.addMessageStatus(result.message.id, "delivered");
+            io.to(userRoom(socket.user.id)).emit("message_status_update", {
+              messageId: result.message.id,
+              status: "delivered",
+            });
+          }
+
+          if (ack) {
+            ack({ ok: true, message: result.message });
+          }
         }
       } catch (error) {
         if (ack) {
@@ -72,18 +98,21 @@ function registerSocketHandlers({ io, config, sessionManager }) {
           body: payload.body,
           type: payload.type || "document",
           mediaFileId: payload.mediaFileId,
-          replyToId: payload.replyToId || null
+          replyToId: payload.replyToId || null,
         });
 
         io.to(userRoom(socket.user.id)).emit("new_message", result.message);
-        io.to(userRoom(socket.user.id)).emit("contact_list_update", result.chat);
+        io.to(userRoom(socket.user.id)).emit(
+          "contact_list_update",
+          result.chat,
+        );
 
         if (result.message.sessionId) {
           await sessionManager.sendMessage(result.message.sessionId, {
             recipient: result.message.receiver,
             body: result.message.body,
             mediaFileId: result.message.mediaFileId,
-            mediaPath: result.message.mediaFile?.relativePath || null
+            mediaPath: result.message.mediaFile?.relativePath || null,
           });
         }
 
@@ -102,7 +131,7 @@ function registerSocketHandlers({ io, config, sessionManager }) {
         chatId: payload.chatId,
         isTyping: Boolean(payload.isTyping),
         userId: socket.user.id,
-        name: socket.user.name
+        name: socket.user.name,
       });
     });
 
@@ -123,5 +152,5 @@ function registerSocketHandlers({ io, config, sessionManager }) {
 
 module.exports = {
   registerSocketHandlers,
-  userRoom
+  userRoom,
 };

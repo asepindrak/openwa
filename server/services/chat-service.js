@@ -1,6 +1,7 @@
 const path = require("path");
 const { prisma } = require("../database/client");
 const { createAvatarDataUrl } = require("../utils/avatar");
+const { v4: uuidv4 } = require("uuid");
 
 let incomingMessageQueue = Promise.resolve();
 
@@ -57,10 +58,10 @@ function mapMessage(message) {
           type: message.replyTo.type,
           sender: message.replyTo.sender,
           direction: message.replyTo.direction,
-          mediaFile: message.replyTo.mediaFile || null
+          mediaFile: message.replyTo.mediaFile || null,
         }
       : null,
-    statuses: message.statuses || []
+    statuses: message.statuses || [],
   };
 }
 
@@ -70,17 +71,19 @@ function mapChat(chat) {
     id: chat.id,
     title: chat.title,
     sessionId: chat.sessionId,
+    pinnedAt: chat.pinnedAt || null,
     contact: {
       id: chat.contact.id,
       externalId: chat.contact.externalId,
+      persona: chat.contact.persona || null,
       displayName: chat.contact.displayName,
       avatarUrl: chat.contact.avatarUrl,
       unreadCount: chat.contact.unreadCount,
       lastMessagePreview: chat.contact.lastMessagePreview,
-      lastMessageAt: chat.contact.lastMessageAt
+      lastMessageAt: chat.contact.lastMessageAt,
     },
     lastMessage,
-    updatedAt: chat.updatedAt
+    updatedAt: chat.updatedAt,
   };
 }
 
@@ -90,6 +93,17 @@ function recentChatTimestamp(chat) {
 
 function sortChatsByRecentActivity(chats) {
   return [...chats].sort((left, right) => {
+    // Pinned chats first (newest pinned first)
+    const leftPinned = left.pinnedAt ? new Date(left.pinnedAt) : null;
+    const rightPinned = right.pinnedAt ? new Date(right.pinnedAt) : null;
+
+    if (leftPinned && rightPinned) {
+      return rightPinned - leftPinned;
+    }
+
+    if (leftPinned) return -1;
+    if (rightPinned) return 1;
+
     const leftRecent = recentChatTimestamp(left);
     const rightRecent = recentChatTimestamp(right);
 
@@ -97,13 +111,8 @@ function sortChatsByRecentActivity(chats) {
       return new Date(rightRecent) - new Date(leftRecent);
     }
 
-    if (rightRecent) {
-      return 1;
-    }
-
-    if (leftRecent) {
-      return -1;
-    }
+    if (rightRecent) return 1;
+    if (leftRecent) return -1;
 
     return new Date(right.updatedAt) - new Date(left.updatedAt);
   });
@@ -119,7 +128,7 @@ function fileLabelForType(type) {
     video: "Video",
     audio: "Audio",
     document: "Document",
-    sticker: "Sticker"
+    sticker: "Sticker",
   };
 
   return labels[type] || "Attachment";
@@ -130,18 +139,24 @@ function sanitizedPreview(body, type) {
 }
 
 function isWhatsAppConversationId(externalId) {
-  return String(externalId || "").endsWith("@c.us") || String(externalId || "").endsWith("@g.us");
+  return (
+    String(externalId || "").endsWith("@c.us") ||
+    String(externalId || "").endsWith("@g.us")
+  );
 }
 
 function pickDisplayName(...values) {
-  return values.map((value) => String(value || "").trim()).find(Boolean) || "Unknown";
+  return (
+    values.map((value) => String(value || "").trim()).find(Boolean) || "Unknown"
+  );
 }
 
 function mapImportedMessageType(type) {
   const normalized = String(type || "text").toLowerCase();
   if (normalized === "image") return "image";
   if (normalized === "video") return "video";
-  if (normalized === "audio" || normalized === "ptt" || normalized === "voice") return "audio";
+  if (normalized === "audio" || normalized === "ptt" || normalized === "voice")
+    return "audio";
   if (normalized === "sticker") return "sticker";
   if (normalized === "document") return "document";
   return "text";
@@ -174,21 +189,30 @@ async function loadChatSummary(chatId) {
           take: 1,
           include: {
             statuses: {
-              orderBy: { createdAt: "asc" }
+              orderBy: { createdAt: "asc" },
             },
             mediaFile: true,
             replyTo: {
               include: {
-                mediaFile: true
-              }
-            }
-          }
-        }
-      }
-    })
+                mediaFile: true,
+              },
+            },
+          },
+        },
+      },
+    }),
   );
 
   return chat ? mapChat(chat) : null;
+}
+
+async function getChatWithContact(userId, chatId) {
+  return retryOnSqliteTimeout(() =>
+    prisma.chat.findFirst({
+      where: { id: chatId, userId },
+      include: { contact: true },
+    }),
+  );
 }
 
 async function ensureWelcomeWorkspace(userId) {
@@ -197,17 +221,17 @@ async function ensureWelcomeWorkspace(userId) {
       where: {
         userId_externalId: {
           userId,
-          externalId: "openwa:assistant"
-        }
+          externalId: "openwa:assistant",
+        },
       },
       update: {},
       create: {
         userId,
         externalId: "openwa:assistant",
         displayName: "OpenWA Assistant",
-        avatarUrl: createAvatarDataUrl("OpenWA Assistant", "openwa:assistant")
-      }
-    })
+        avatarUrl: createAvatarDataUrl("OpenWA Assistant", "openwa:assistant"),
+      },
+    }),
   );
 
   const existingChat = await retryOnSqliteTimeout(() =>
@@ -215,13 +239,24 @@ async function ensureWelcomeWorkspace(userId) {
       where: {
         userId_contactId: {
           userId,
-          contactId: contact.id
-        }
-      }
-    })
+          contactId: contact.id,
+        },
+      },
+    }),
   );
 
   if (existingChat) {
+    // Ensure assistant chat is pinned so it appears at the top
+    if (!existingChat.pinnedAt) {
+      const updated = await retryOnSqliteTimeout(() =>
+        prisma.chat.update({
+          where: { id: existingChat.id },
+          data: { pinnedAt: new Date() },
+        }),
+      );
+      return updated;
+    }
+
     return existingChat;
   }
 
@@ -239,23 +274,24 @@ async function ensureWelcomeWorkspace(userId) {
             type: "text",
             direction: "inbound",
             statuses: {
-              create: [{ status: "delivered" }, { status: "read" }]
-            }
-          }
-        }
-      }
-    })
+              create: [{ status: "delivered" }, { status: "read" }],
+            },
+          },
+        },
+      },
+    }),
   );
 
   await retryOnSqliteTimeout(() =>
     prisma.contact.update({
       where: { id: contact.id },
       data: {
-        lastMessagePreview: "Selamat datang di OpenWA. Tambahkan sesi WhatsApp baru untuk mulai menghubungkan nomor.",
+        lastMessagePreview:
+          "Selamat datang di OpenWA. Tambahkan sesi WhatsApp baru untuk mulai menghubungkan nomor.",
         lastMessageAt: new Date(),
-        unreadCount: 0
-      }
-    })
+        unreadCount: 0,
+      },
+    }),
   );
 
   return chat;
@@ -269,31 +305,31 @@ async function createSessionCompanionChat(userId, session) {
       where: {
         userId_externalId: {
           userId,
-          externalId
-        }
+          externalId,
+        },
       },
       update: {
         displayName,
         sessionId: session.id,
-        avatarUrl: createAvatarDataUrl(displayName, externalId)
+        avatarUrl: createAvatarDataUrl(displayName, externalId),
       },
       create: {
         userId,
         sessionId: session.id,
         externalId,
         displayName,
-        avatarUrl: createAvatarDataUrl(displayName, externalId)
-      }
-    })
+        avatarUrl: createAvatarDataUrl(displayName, externalId),
+      },
+    }),
   );
 
   const existingChat = await prisma.chat.findUnique({
     where: {
       userId_contactId: {
         userId,
-        contactId: contact.id
-      }
-    }
+        contactId: contact.id,
+      },
+    },
   });
 
   if (!existingChat) {
@@ -303,6 +339,8 @@ async function createSessionCompanionChat(userId, session) {
         sessionId: session.id,
         contactId: contact.id,
         title: displayName,
+        // Pin session companion chats so AI assistants are grouped at top
+        pinnedAt: new Date(),
         messages: {
           create: {
             sender: externalId,
@@ -311,21 +349,76 @@ async function createSessionCompanionChat(userId, session) {
             type: "text",
             direction: "inbound",
             statuses: {
-              create: [{ status: "delivered" }]
-            }
-          }
-        }
-      }
+              create: [{ status: "delivered" }],
+            },
+          },
+        },
+      },
     });
 
     await prisma.contact.update({
       where: { id: contact.id },
       data: {
         lastMessagePreview: `Session ${session.name} siap digunakan. Klik Connect untuk menghasilkan QR code.`,
-        lastMessageAt: new Date()
-      }
+        lastMessageAt: new Date(),
+      },
     });
   }
+}
+
+async function createAssistantConversation(userId, { title } = {}) {
+  const externalId = `openwa:assistant:${uuidv4()}`;
+  const displayName = title
+    ? String(title).trim()
+    : `Assistant ${new Date().toLocaleString()}`;
+
+  const contact = await retryOnSqliteTimeout(() =>
+    prisma.contact.create({
+      data: {
+        userId,
+        externalId,
+        displayName,
+        avatarUrl: createAvatarDataUrl(displayName, externalId),
+      },
+    }),
+  );
+
+  const chat = await retryOnSqliteTimeout(() =>
+    prisma.chat.create({
+      data: {
+        userId,
+        sessionId: null,
+        contactId: contact.id,
+        title: displayName,
+        pinnedAt: new Date(),
+        messages: {
+          create: {
+            sender: externalId,
+            receiver: `user:${userId}`,
+            body: "Percakapan Assistant baru dimulai.",
+            type: "text",
+            direction: "inbound",
+            statuses: {
+              create: [{ status: "delivered" }],
+            },
+          },
+        },
+      },
+      include: { contact: true },
+    }),
+  );
+
+  await retryOnSqliteTimeout(() =>
+    prisma.contact.update({
+      where: { id: contact.id },
+      data: {
+        lastMessagePreview: "Percakapan Assistant baru dimulai.",
+        lastMessageAt: new Date(),
+      },
+    }),
+  );
+
+  return loadChatSummary(chat.id);
 }
 
 async function listChats(userId, sessionId, search) {
@@ -337,9 +430,9 @@ async function listChats(userId, sessionId, search) {
         NOT: {
           contact: {
             externalId: {
-              endsWith: "@broadcast"
-            }
-          }
+              endsWith: "@broadcast",
+            },
+          },
         },
         ...(sessionId ? { sessionId } : {}),
         ...(normalizedSearch
@@ -347,26 +440,26 @@ async function listChats(userId, sessionId, search) {
               OR: [
                 {
                   title: {
-                    contains: normalizedSearch
-                  }
+                    contains: normalizedSearch,
+                  },
                 },
                 {
                   contact: {
                     displayName: {
-                      contains: normalizedSearch
-                    }
-                  }
+                      contains: normalizedSearch,
+                    },
+                  },
                 },
                 {
                   contact: {
                     lastMessagePreview: {
-                      contains: normalizedSearch
-                    }
-                  }
-                }
-              ]
+                      contains: normalizedSearch,
+                    },
+                  },
+                },
+              ],
             }
-          : {})
+          : {}),
       },
       include: {
         contact: true,
@@ -375,18 +468,18 @@ async function listChats(userId, sessionId, search) {
           take: 1,
           include: {
             statuses: {
-              orderBy: { createdAt: "asc" }
+              orderBy: { createdAt: "asc" },
             },
             mediaFile: true,
             replyTo: {
               include: {
-                mediaFile: true
-              }
-            }
-          }
-        }
+                mediaFile: true,
+              },
+            },
+          },
+        },
       },
-      orderBy: { updatedAt: "desc" }
+      orderBy: { updatedAt: "desc" },
     });
   });
 
@@ -402,9 +495,9 @@ async function listMessages(userId, chatId, options = {}) {
     prisma.chat.findFirst({
       where: {
         id: chatId,
-        userId
-      }
-    })
+        userId,
+      },
+    }),
   );
 
   if (!chat) {
@@ -416,8 +509,8 @@ async function listMessages(userId, chatId, options = {}) {
     ...(before && !Number.isNaN(before.getTime())
       ? {
           createdAt: {
-            lt: before
-          }
+            lt: before,
+          },
         }
       : {}),
     ...(search
@@ -425,17 +518,17 @@ async function listMessages(userId, chatId, options = {}) {
           OR: [
             {
               body: {
-                contains: search
-              }
+                contains: search,
+              },
             },
             {
               sender: {
-                contains: search
-              }
-            }
-          ]
+                contains: search,
+              },
+            },
+          ],
         }
-      : {})
+      : {}),
   };
 
   const results = await retryOnSqliteTimeout(() =>
@@ -445,16 +538,16 @@ async function listMessages(userId, chatId, options = {}) {
       take: limit + 1,
       include: {
         statuses: {
-          orderBy: { createdAt: "asc" }
+          orderBy: { createdAt: "asc" },
         },
         mediaFile: true,
         replyTo: {
           include: {
-            mediaFile: true
-          }
-        }
-      }
-    })
+            mediaFile: true,
+          },
+        },
+      },
+    }),
   );
 
   const hasMore = results.length > limit;
@@ -463,7 +556,7 @@ async function listMessages(userId, chatId, options = {}) {
   return {
     messages: items.map(mapMessage),
     hasMore,
-    nextBefore: items.length > 0 ? items[0].createdAt : null
+    nextBefore: items.length > 0 ? items[0].createdAt : null,
   };
 }
 
@@ -475,8 +568,8 @@ async function createMediaFile(userId, file) {
       originalName: file.originalname,
       mimeType: file.mimetype || "application/octet-stream",
       size: file.size,
-      relativePath: path.join("media", file.filename).replaceAll("\\", "/")
-    }
+      relativePath: path.join("media", file.filename).replaceAll("\\", "/"),
+    },
   });
 }
 
@@ -486,16 +579,23 @@ async function touchContactPreview(contactId, preview, unreadDelta = 0) {
     data: {
       lastMessagePreview: preview,
       lastMessageAt: new Date(),
-      unreadCount: unreadDelta > 0 ? { increment: unreadDelta } : undefined
-    }
+      unreadCount: unreadDelta > 0 ? { increment: unreadDelta } : undefined,
+    },
   });
 }
 
-async function createOutgoingMessage({ userId, chatId, body, type = "text", mediaFileId = null, replyToId = null }) {
+async function createOutgoingMessage({
+  userId,
+  chatId,
+  body,
+  type = "text",
+  mediaFileId = null,
+  replyToId = null,
+}) {
   const chat = await retryOnSqliteTimeout(async () => {
     return prisma.chat.findFirst({
       where: { id: chatId, userId },
-      include: { contact: true }
+      include: { contact: true },
     });
   });
 
@@ -508,8 +608,8 @@ async function createOutgoingMessage({ userId, chatId, body, type = "text", medi
       return prisma.message.findFirst({
         where: {
           id: replyToId,
-          chatId: chat.id
-        }
+          chatId: chat.id,
+        },
       });
     });
 
@@ -531,34 +631,34 @@ async function createOutgoingMessage({ userId, chatId, body, type = "text", medi
         type,
         direction: "outbound",
         statuses: {
-          create: [{ status: "sent" }]
-        }
+          create: [{ status: "sent" }],
+        },
       },
       include: {
         statuses: {
-          orderBy: { createdAt: "asc" }
+          orderBy: { createdAt: "asc" },
         },
         mediaFile: true,
         replyTo: {
           include: {
-            mediaFile: true
-          }
-        }
-      }
+            mediaFile: true,
+          },
+        },
+      },
     });
   });
 
   await retryOnSqliteTimeout(async () => {
     return prisma.chat.update({
       where: { id: chat.id },
-      data: { updatedAt: new Date() }
+      data: { updatedAt: new Date() },
     });
   });
   await touchContactPreview(chat.contactId, sanitizedPreview(body, type), 0);
 
   return {
     chat: await loadChatSummary(chat.id),
-    message: mapMessage(message)
+    message: mapMessage(message),
   };
 }
 
@@ -566,36 +666,51 @@ async function addMessageStatus(messageId, status) {
   return prisma.messageStatus.create({
     data: {
       messageId,
-      status
-    }
+      status,
+    },
   });
 }
 
-async function ensureChatForIncoming({ userId, sessionId, externalId, displayName, avatarUrl = null }) {
+async function ensureChatForIncoming({
+  userId,
+  sessionId,
+  externalId,
+  displayName,
+  avatarUrl = null,
+}) {
   const contact = await ensureWhatsappContact({
     userId,
     sessionId,
     externalId,
     displayName,
-    avatarUrl
+    avatarUrl,
   });
 
   return ensureChatForContact(userId, contact.id);
 }
 
-async function ensureWhatsappContact({ userId, sessionId, externalId, displayName, avatarUrl = null }) {
+async function ensureWhatsappContact({
+  userId,
+  sessionId,
+  externalId,
+  displayName,
+  avatarUrl = null,
+}) {
   const resolvedDisplayName = pickDisplayName(displayName, externalId);
   const existing = await retryOnSqliteTimeout(() =>
     prisma.contact.findUnique({
       where: {
         userId_externalId: {
           userId,
-          externalId
-        }
-      }
-    })
+          externalId,
+        },
+      },
+    }),
   );
-  const nextAvatarUrl = avatarUrl || existing?.avatarUrl || createAvatarDataUrl(resolvedDisplayName, externalId);
+  const nextAvatarUrl =
+    avatarUrl ||
+    existing?.avatarUrl ||
+    createAvatarDataUrl(resolvedDisplayName, externalId);
 
   if (existing) {
     return retryOnSqliteTimeout(() =>
@@ -604,9 +719,9 @@ async function ensureWhatsappContact({ userId, sessionId, externalId, displayNam
         data: {
           displayName: resolvedDisplayName,
           sessionId,
-          avatarUrl: nextAvatarUrl
-        }
-      })
+          avatarUrl: nextAvatarUrl,
+        },
+      }),
     );
   }
 
@@ -617,9 +732,9 @@ async function ensureWhatsappContact({ userId, sessionId, externalId, displayNam
         sessionId,
         externalId,
         displayName: resolvedDisplayName,
-        avatarUrl: nextAvatarUrl
-      }
-    })
+        avatarUrl: nextAvatarUrl,
+      },
+    }),
   );
 }
 
@@ -628,9 +743,9 @@ async function ensureChatForContact(userId, contactId) {
     prisma.contact.findFirst({
       where: {
         id: contactId,
-        userId
-      }
-    })
+        userId,
+      },
+    }),
   );
 
   if (!contact) {
@@ -642,23 +757,23 @@ async function ensureChatForContact(userId, contactId) {
       where: {
         userId_contactId: {
           userId,
-          contactId: contact.id
-        }
+          contactId: contact.id,
+        },
       },
       update: {
         sessionId: contact.sessionId,
-        title: contact.displayName
+        title: contact.displayName,
       },
       create: {
         userId,
         sessionId: contact.sessionId,
         contactId: contact.id,
-        title: contact.displayName
+        title: contact.displayName,
       },
       include: {
-        contact: true
-      }
-    })
+        contact: true,
+      },
+    }),
   );
 }
 
@@ -677,31 +792,28 @@ async function listContacts(userId, sessionId, search) {
           {
             OR: [
               { externalId: { endsWith: "@c.us" } },
-              { externalId: { endsWith: "@g.us" } }
-            ]
+              { externalId: { endsWith: "@g.us" } },
+            ],
           },
           ...(normalizedSearch
             ? [
                 {
                   OR: [
                     { displayName: { contains: normalizedSearch } },
-                    { externalId: { contains: normalizedSearch } }
-                  ]
-                }
+                    { externalId: { contains: normalizedSearch } },
+                  ],
+                },
               ]
-            : [])
-        ]
+            : []),
+        ],
       },
       include: {
         chats: {
-          take: 1
-        }
+          take: 1,
+        },
       },
-      orderBy: [
-        { lastMessageAt: "desc" },
-        { displayName: "asc" }
-      ]
-    })
+      orderBy: [{ lastMessageAt: "desc" }, { displayName: "asc" }],
+    }),
   );
 
   return contacts.map((contact) => ({
@@ -714,7 +826,7 @@ async function listContacts(userId, sessionId, search) {
     unreadCount: contact.unreadCount,
     sessionId: contact.sessionId,
     hasChat: contact.chats.length > 0,
-    chatId: contact.chats[0]?.id || null
+    chatId: contact.chats[0]?.id || null,
   }));
 }
 
@@ -723,7 +835,12 @@ async function openChatForContact(userId, contactId) {
   return loadChatSummary(chat.id);
 }
 
-async function syncWhatsappSnapshot({ userId, sessionId, contacts = [], chats = [] }) {
+async function syncWhatsappSnapshot({
+  userId,
+  sessionId,
+  contacts = [],
+  chats = [],
+}) {
   for (const contactEntry of contacts) {
     if (!isWhatsAppConversationId(contactEntry.externalId)) {
       continue;
@@ -733,8 +850,12 @@ async function syncWhatsappSnapshot({ userId, sessionId, contacts = [], chats = 
       userId,
       sessionId,
       externalId: contactEntry.externalId,
-      displayName: pickDisplayName(contactEntry.name, contactEntry.pushname, contactEntry.externalId),
-      avatarUrl: contactEntry.avatarUrl || null
+      displayName: pickDisplayName(
+        contactEntry.name,
+        contactEntry.pushname,
+        contactEntry.externalId,
+      ),
+      avatarUrl: contactEntry.avatarUrl || null,
     });
   }
 
@@ -747,12 +868,18 @@ async function syncWhatsappSnapshot({ userId, sessionId, contacts = [], chats = 
       userId,
       sessionId,
       externalId: chatEntry.externalId,
-      displayName: pickDisplayName(chatEntry.name, chatEntry.pushname, chatEntry.externalId),
-      avatarUrl: chatEntry.avatarUrl || null
+      displayName: pickDisplayName(
+        chatEntry.name,
+        chatEntry.pushname,
+        chatEntry.externalId,
+      ),
+      avatarUrl: chatEntry.avatarUrl || null,
     });
 
     const chat = await ensureChatForContact(userId, contact.id);
-    const sortedMessages = [...(chatEntry.messages || [])].sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt));
+    const sortedMessages = [...(chatEntry.messages || [])].sort(
+      (left, right) => new Date(left.createdAt) - new Date(right.createdAt),
+    );
 
     for (const item of sortedMessages) {
       if (!item.externalMessageId) {
@@ -762,8 +889,8 @@ async function syncWhatsappSnapshot({ userId, sessionId, contacts = [], chats = 
       const existing = await prisma.message.findFirst({
         where: {
           chatId: chat.id,
-          externalMessageId: item.externalMessageId
-        }
+          externalMessageId: item.externalMessageId,
+        },
       });
 
       if (existing) {
@@ -777,90 +904,113 @@ async function syncWhatsappSnapshot({ userId, sessionId, contacts = [], chats = 
           chatId: chat.id,
           sessionId,
           externalMessageId: item.externalMessageId,
-          sender: direction === "outbound" ? `user:${userId}` : item.sender || chatEntry.externalId,
-          receiver: direction === "outbound" ? chatEntry.externalId : `user:${userId}`,
+          sender:
+            direction === "outbound"
+              ? `user:${userId}`
+              : item.sender || chatEntry.externalId,
+          receiver:
+            direction === "outbound" ? chatEntry.externalId : `user:${userId}`,
           body: item.body || null,
           type: mapImportedMessageType(item.type),
           direction,
           createdAt,
           updatedAt: createdAt,
           statuses: {
-            create: importedStatuses(direction, item.ack)
-          }
-        }
+            create: importedStatuses(direction, item.ack),
+          },
+        },
       });
     }
 
     const latestMessage = await prisma.message.findFirst({
       where: { chatId: chat.id },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
 
     await prisma.chat.update({
       where: { id: chat.id },
       data: {
-        updatedAt: latestMessage?.createdAt || new Date()
-      }
+        updatedAt: latestMessage?.createdAt || new Date(),
+      },
     });
 
     await prisma.contact.update({
       where: { id: contact.id },
       data: {
-        lastMessagePreview: latestMessage ? sanitizedPreview(latestMessage.body, latestMessage.type) : contact.lastMessagePreview,
-        lastMessageAt: latestMessage?.createdAt || contact.lastMessageAt
-      }
+        lastMessagePreview: latestMessage
+          ? sanitizedPreview(latestMessage.body, latestMessage.type)
+          : contact.lastMessagePreview,
+        lastMessageAt: latestMessage?.createdAt || contact.lastMessageAt,
+      },
     });
   }
 }
 
-async function storeIncomingMessage({ userId, sessionId, sender, displayName, avatarUrl = null, body, type = "text" }) {
+async function storeIncomingMessage({
+  userId,
+  sessionId,
+  sender,
+  displayName,
+  avatarUrl = null,
+  body,
+  type = "text",
+  mediaFileId = null,
+}) {
   return enqueueIncomingMessage(async () => {
     const chat = await ensureChatForIncoming({
       userId,
       sessionId,
       externalId: sender,
       displayName: displayName || sender,
-      avatarUrl
+      avatarUrl,
     });
 
-    const message = await createIncomingMessageWithRetry({
-      data: {
-        chatId: chat.id,
-        sessionId,
-        sender,
-        receiver: `user:${userId}`,
-        body,
-        type,
-        direction: "inbound",
-        statuses: {
-          create: [{ status: "delivered" }]
-        }
+    const dataObj = {
+      chatId: chat.id,
+      sessionId,
+      sender,
+      receiver: `user:${userId}`,
+      body,
+      type,
+      direction: "inbound",
+      statuses: {
+        create: [{ status: "delivered" }],
       },
+    };
+
+    if (mediaFileId) {
+      dataObj.mediaFileId = mediaFileId;
+    }
+
+    const message = await createIncomingMessageWithRetry({
+      data: dataObj,
       include: {
         statuses: {
-          orderBy: { createdAt: "asc" }
+          orderBy: { createdAt: "asc" },
         },
         mediaFile: true,
         replyTo: {
           include: {
-            mediaFile: true
-          }
-        }
-      }
+            mediaFile: true,
+          },
+        },
+      },
     });
 
     await retryOnSqliteTimeout(() =>
       prisma.chat.update({
         where: { id: chat.id },
-        data: { updatedAt: new Date() }
-      })
+        data: { updatedAt: new Date() },
+      }),
     );
 
-    await retryOnSqliteTimeout(() => touchContactPreview(chat.contactId, sanitizedPreview(body, type), 1));
+    await retryOnSqliteTimeout(() =>
+      touchContactPreview(chat.contactId, sanitizedPreview(body, type), 1),
+    );
 
     return {
       chat: await loadChatSummary(chat.id),
-      message: mapMessage(message)
+      message: mapMessage(message),
     };
   });
 }
@@ -868,8 +1018,8 @@ async function storeIncomingMessage({ userId, sessionId, sender, displayName, av
 async function markChatOpened(userId, chatId) {
   const chat = await retryOnSqliteTimeout(() =>
     prisma.chat.findFirst({
-      where: { id: chatId, userId }
-    })
+      where: { id: chatId, userId },
+    }),
   );
 
   if (!chat) {
@@ -878,15 +1028,15 @@ async function markChatOpened(userId, chatId) {
 
   await prisma.contact.update({
     where: { id: chat.contactId },
-    data: { unreadCount: 0 }
+    data: { unreadCount: 0 },
   });
 
   const unreadMessages = await prisma.message.findMany({
     where: {
       chatId,
-      direction: "inbound"
+      direction: "inbound",
     },
-    select: { id: true }
+    select: { id: true },
   });
 
   await Promise.all(
@@ -894,11 +1044,46 @@ async function markChatOpened(userId, chatId) {
       prisma.messageStatus.create({
         data: {
           messageId: message.id,
-          status: "read"
-        }
-      })
-    )
+          status: "read",
+        },
+      }),
+    ),
   );
+}
+
+async function pinChat(userId, chatId) {
+  const chat = await retryOnSqliteTimeout(() =>
+    prisma.chat.findFirst({ where: { id: chatId, userId } }),
+  );
+
+  if (!chat) {
+    throw new Error("Chat not found.");
+  }
+
+  await retryOnSqliteTimeout(() =>
+    prisma.chat.update({
+      where: { id: chat.id },
+      data: { pinnedAt: new Date() },
+    }),
+  );
+
+  return loadChatSummary(chat.id);
+}
+
+async function unpinChat(userId, chatId) {
+  const chat = await retryOnSqliteTimeout(() =>
+    prisma.chat.findFirst({ where: { id: chatId, userId } }),
+  );
+
+  if (!chat) {
+    throw new Error("Chat not found.");
+  }
+
+  await retryOnSqliteTimeout(() =>
+    prisma.chat.update({ where: { id: chat.id }, data: { pinnedAt: null } }),
+  );
+
+  return loadChatSummary(chat.id);
 }
 
 async function deleteMessage(userId, messageId) {
@@ -906,11 +1091,11 @@ async function deleteMessage(userId, messageId) {
     return prisma.message.findFirst({
       where: {
         id: messageId,
-        sender: `user:${userId}`
+        sender: `user:${userId}`,
       },
       include: {
-        chat: true
-      }
+        chat: true,
+      },
     });
   });
 
@@ -923,26 +1108,26 @@ async function deleteMessage(userId, messageId) {
       where: { id: message.id },
       data: {
         body: "Pesan dihapus",
-        mediaFileId: null
+        mediaFileId: null,
       },
       include: {
         statuses: {
-          orderBy: { createdAt: "asc" }
+          orderBy: { createdAt: "asc" },
         },
         mediaFile: true,
         replyTo: {
           include: {
-            mediaFile: true
-          }
-        }
-      }
+            mediaFile: true,
+          },
+        },
+      },
     });
   });
 
   const latestMessage = await retryOnSqliteTimeout(async () => {
     return prisma.message.findFirst({
       where: { chatId: message.chatId },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
   });
 
@@ -950,15 +1135,17 @@ async function deleteMessage(userId, messageId) {
     return prisma.contact.update({
       where: { id: message.chat.contactId },
       data: {
-        lastMessagePreview: latestMessage ? sanitizedPreview(latestMessage.body, latestMessage.type) : "Belum ada pesan",
-        lastMessageAt: latestMessage?.createdAt || null
-      }
+        lastMessagePreview: latestMessage
+          ? sanitizedPreview(latestMessage.body, latestMessage.type)
+          : "Belum ada pesan",
+        lastMessageAt: latestMessage?.createdAt || null,
+      },
     });
   });
 
   return {
     chat: await loadChatSummary(message.chatId),
-    message: mapMessage(updatedMessage)
+    message: mapMessage(updatedMessage),
   };
 }
 
@@ -968,17 +1155,17 @@ async function forwardMessage(userId, messageId, targetChatId) {
       where: {
         id: messageId,
         chat: {
-          userId
-        }
+          userId,
+        },
       },
       include: {
         mediaFile: true,
         replyTo: {
           include: {
-            mediaFile: true
-          }
-        }
-      }
+            mediaFile: true,
+          },
+        },
+      },
     });
   });
 
@@ -992,7 +1179,7 @@ async function forwardMessage(userId, messageId, targetChatId) {
     body: sourceMessage.body,
     type: sourceMessage.type,
     mediaFileId: sourceMessage.mediaFileId || null,
-    replyToId: null
+    replyToId: null,
   });
 }
 
@@ -1010,5 +1197,8 @@ module.exports = {
   markChatOpened,
   openChatForContact,
   syncWhatsappSnapshot,
-  storeIncomingMessage
+  storeIncomingMessage,
+  pinChat,
+  unpinChat,
+  getChatWithContact,
 };

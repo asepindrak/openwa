@@ -8,7 +8,7 @@ function formatTime(value) {
 
   return new Intl.DateTimeFormat("en-US", {
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
@@ -23,20 +23,50 @@ function initials(name) {
 
 function Avatar({ src, label }) {
   if (src) {
-    return <img src={src} alt={label} className="h-12 w-12 shrink-0 rounded-2xl object-cover" />;
+    return (
+      <img
+        src={src}
+        alt={label}
+        className="h-12 w-12 shrink-0 rounded-2xl object-cover"
+      />
+    );
   }
 
-  return <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#2e2f2f] text-sm font-semibold text-white">{initials(label)}</div>;
+  return (
+    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#2e2f2f] text-sm font-semibold text-white">
+      {initials(label)}
+    </div>
+  );
 }
 
-export function ContactList({ chats, activeChatId, onSelectChat, currentUser, loading, query, onQueryChange }) {
-  const normalizedQuery = String(query || "").trim().toLowerCase();
-  const filteredChats = chats.filter((chat) =>
-    !normalizedQuery
-      || [chat.contact.displayName, chat.contact.lastMessagePreview, chat.title]
-        .filter(Boolean)
-        .some((value) => value.toLowerCase().includes(normalizedQuery))
+export function ContactList({
+  chats,
+  activeChatId,
+  onSelectChat,
+  currentUser,
+  loading,
+  query,
+  onQueryChange,
+  onTogglePin,
+}) {
+  const normalizedQuery = String(query || "")
+    .trim()
+    .toLowerCase();
+  const assistantChat = chats.find(
+    (c) => c.contact && c.contact.externalId === "openwa:assistant",
   );
+
+  const filteredChats = chats
+    .filter(
+      (chat) => chat.contact && chat.contact.externalId !== "openwa:assistant",
+    )
+    .filter(
+      (chat) =>
+        !normalizedQuery ||
+        [chat.contact.displayName, chat.contact.lastMessagePreview, chat.title]
+          .filter(Boolean)
+          .some((value) => value.toLowerCase().includes(normalizedQuery)),
+    );
 
   return (
     <aside className="flex h-full w-[360px] shrink-0 flex-col bg-[#161717]">
@@ -59,9 +89,61 @@ export function ContactList({ chats, activeChatId, onSelectChat, currentUser, lo
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
         {loading ? <ConversationsSkeletonList /> : null}
-        {!loading && filteredChats.length === 0 ? <p className="px-3 py-4 text-sm leading-6 text-white/40">No synced conversations yet. Connect your device to load chats.</p> : null}
+        {!loading && filteredChats.length === 0 ? (
+          <p className="px-3 py-4 text-sm leading-6 text-white/40">
+            No synced conversations yet. Connect your device to load chats.
+          </p>
+        ) : null}
 
         <div className="space-y-2">
+          {assistantChat ? (
+            <button
+              type="button"
+              className={`flex w-full items-start gap-3 rounded-[16px] px-4 py-3 text-left transition ${
+                assistantChat.id === activeChatId
+                  ? "bg-[#2e2f2f]"
+                  : "bg-transparent hover:bg-white/[0.05]"
+              }`}
+              onClick={() => onSelectChat(assistantChat.id)}
+            >
+              <Avatar
+                src={assistantChat.contact.avatarUrl}
+                label={assistantChat.contact.displayName}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="truncate font-medium text-white">
+                    {assistantChat.contact.displayName}
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 text-[11px] text-white/35">
+                      {/* show last message time if any */}
+                      {assistantChat.contact.lastMessageAt ||
+                      assistantChat.updatedAt
+                        ? new Intl.DateTimeFormat("en-US", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          }).format(
+                            new Date(
+                              assistantChat.contact.lastMessageAt ||
+                                assistantChat.updatedAt,
+                            ),
+                          )
+                        : ""}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-3">
+                  <p className="truncate text-sm text-white/42">
+                    {assistantChat.contact.persona
+                      ? assistantChat.contact.persona
+                      : assistantChat.contact.lastMessagePreview ||
+                        "No messages yet"}
+                  </p>
+                </div>
+              </div>
+            </button>
+          ) : null}
           {filteredChats.map((chat) => (
             <button
               key={chat.id}
@@ -73,14 +155,37 @@ export function ContactList({ chats, activeChatId, onSelectChat, currentUser, lo
               }`}
               onClick={() => onSelectChat(chat.id)}
             >
-              <Avatar src={chat.contact.avatarUrl} label={chat.contact.displayName} />
+              <Avatar
+                src={chat.contact.avatarUrl}
+                label={chat.contact.displayName}
+              />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-3">
-                  <h3 className="truncate font-medium text-white">{chat.contact.displayName}</h3>
-                  <span className="shrink-0 text-[11px] text-white/35">{formatTime(chat.contact.lastMessageAt || chat.updatedAt)}</span>
+                  <h3 className="truncate font-medium text-white">
+                    {chat.contact.displayName}
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (typeof onTogglePin === "function")
+                          onTogglePin(chat.id, !!chat.pinnedAt);
+                      }}
+                      className="text-white/40 hover:text-white/70"
+                      aria-label={chat.pinnedAt ? "Unpin chat" : "Pin chat"}
+                    >
+                      {chat.pinnedAt ? "📌" : "📍"}
+                    </button>
+                    <span className="shrink-0 text-[11px] text-white/35">
+                      {formatTime(chat.contact.lastMessageAt || chat.updatedAt)}
+                    </span>
+                  </div>
                 </div>
                 <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="truncate text-sm text-white/42">{chat.contact.lastMessagePreview || "No messages yet"}</p>
+                  <p className="truncate text-sm text-white/42">
+                    {chat.contact.lastMessagePreview || "No messages yet"}
+                  </p>
                   {chat.contact.unreadCount ? (
                     <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-500 px-1.5 text-[11px] font-bold text-[#10251a]">
                       {chat.contact.unreadCount}

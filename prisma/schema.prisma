@@ -40,35 +40,37 @@ enum MessageDirection {
 }
 
 model User {
-   id           String            @id @default(cuid())
-   name         String
-   email        String            @unique
-   passwordHash String
-   createdAt    DateTime          @default(now())
-   updatedAt    DateTime          @updatedAt
-   contacts     Contact[]
-   chats        Chat[]
-   sessions     WhatsappSession[]
-   mediaFiles   MediaFile[]
-   apiKeys      ApiKey[]
+  id               String            @id @default(cuid())
+  name             String
+  email            String            @unique
+  passwordHash     String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  contacts         Contact[]
+  chats            Chat[]
+  sessions         WhatsappSession[]
+  mediaFiles       MediaFile[]
+  apiKeys          ApiKey[]
+  aiProviders      AiProvider[]
+  terminalCommands TerminalCommand[]
 
-   @@map("users")
+  @@map("users")
 }
 
 model ApiKey {
-   id         String   @id @default(cuid())
-   userId     String
-   name       String
-   keyHash    String   @unique
-   keyPrefix  String
-   last4      String
-   lastUsedAt DateTime?
-   createdAt  DateTime @default(now())
-   updatedAt  DateTime @updatedAt
-   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String    @id @default(cuid())
+  userId     String
+  name       String
+  keyHash    String    @unique
+  keyPrefix  String
+  last4      String
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-   @@index([userId, createdAt])
-   @@map("api_keys")
+  @@index([userId, createdAt])
+  @@map("api_keys")
 }
 
 model WhatsappSession {
@@ -92,19 +94,20 @@ model WhatsappSession {
 }
 
 model Contact {
-  id                 String            @id @default(cuid())
+  id                 String           @id @default(cuid())
   userId             String
   sessionId          String?
   externalId         String
   displayName        String
+  persona            String?
   avatarUrl          String?
   lastMessagePreview String?
   lastMessageAt      DateTime?
-  unreadCount        Int               @default(0)
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  session            WhatsappSession?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  unreadCount        Int              @default(0)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session            WhatsappSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   chats              Chat[]
 
   @@unique([userId, externalId])
@@ -112,16 +115,17 @@ model Contact {
 }
 
 model Chat {
-  id        String            @id @default(cuid())
+  id        String           @id @default(cuid())
   userId    String
   sessionId String?
   contactId String
   title     String
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
-  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  session   WhatsappSession?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-  contact   Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  pinnedAt  DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session   WhatsappSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  contact   Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
   messages  Message[]
 
   @@unique([userId, contactId])
@@ -146,7 +150,7 @@ model MediaFile {
 }
 
 model Message {
-  id                String             @id @default(cuid())
+  id                String           @id @default(cuid())
   chatId            String
   sessionId         String?
   mediaFileId       String?
@@ -155,15 +159,15 @@ model Message {
   sender            String
   receiver          String
   body              String?
-  type              MessageType        @default(text)
+  type              MessageType      @default(text)
   direction         MessageDirection
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  chat              Chat               @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  session           WhatsappSession?   @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-  mediaFile         MediaFile?         @relation(fields: [mediaFileId], references: [id], onDelete: SetNull)
-  replyTo           Message?           @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies           Message[]          @relation("MessageReplies")
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  chat              Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  session           WhatsappSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  mediaFile         MediaFile?       @relation(fields: [mediaFileId], references: [id], onDelete: SetNull)
+  replyTo           Message?         @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies           Message[]        @relation("MessageReplies")
   statuses          MessageStatus[]
 
   @@index([chatId, createdAt])
@@ -179,4 +183,47 @@ model MessageStatus {
 
   @@index([messageId, createdAt])
   @@map("message_status")
+}
+
+model AiProvider {
+  id        String   @id @default(cuid())
+  userId    String
+  provider  String
+  name      String
+  config    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("ai_providers")
+}
+
+enum TerminalCommandStatus {
+  pending
+  approved
+  denied
+  running
+  completed
+  failed
+}
+
+enum TerminalApprovalMode {
+  auto
+  manual
+}
+
+model TerminalCommand {
+  id           String                @id @default(cuid())
+  userId       String
+  command      String
+  approvalMode TerminalApprovalMode  @default(manual)
+  status       TerminalCommandStatus @default(pending)
+  requestedAt  DateTime              @default(now())
+  executedAt   DateTime?
+  result       Json?
+  user         User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@map("terminal_commands")
 }
