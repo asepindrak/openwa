@@ -9,42 +9,71 @@ function createOpenApiDocument(config) {
     info: {
       title: "OpenWA API",
       version: packageJson.version,
-      description: "HTTP API for the local OpenWA runtime, including auth, sessions, chats, contacts, messaging, and runtime metadata. For AI agents, fetch `/docs/readme` first, then authenticate with `X-API-Key` and use the HTTP endpoints directly."
+      description:
+        "HTTP API for the local OpenWA runtime, including auth, sessions, chats, contacts, messaging, and runtime metadata. For AI agents, fetch `/docs/readme` first, then authenticate with `X-API-Key` and use the HTTP endpoints directly.",
     },
     servers: [
-      { url: config.frontendUrl, description: "Frontend-facing URL with proxied docs/health/version endpoints" },
-      { url: config.backendUrl, description: "Direct backend API URL" }
+      {
+        url: config.frontendUrl,
+        description:
+          "Frontend-facing URL with proxied docs/health/version endpoints",
+      },
+      { url: config.backendUrl, description: "Direct backend API URL" },
     ],
     tags: [
       { name: "Runtime" },
+      { name: "Webhooks" },
       { name: "Auth" },
       { name: "Workspace" },
       { name: "Sessions" },
       { name: "Chats" },
       { name: "Contacts" },
       { name: "Messages" },
-      { name: "Media" }
+      { name: "Media" },
     ],
     components: {
       securitySchemes: {
         bearerAuth: {
           type: "http",
           scheme: "bearer",
-          bearerFormat: "JWT"
+          bearerFormat: "JWT",
         },
         apiKeyAuth: {
           type: "apiKey",
           in: "header",
-          name: "X-API-Key"
-        }
+          name: "X-API-Key",
+        },
       },
       schemas: {
         ErrorResponse: {
           type: "object",
           properties: {
-            error: { type: "string" }
+            error: { type: "string" },
           },
-          required: ["error"]
+          required: ["error"],
+        },
+        WebhookConfig: {
+          type: "object",
+          properties: {
+            url: { type: "string", format: "uri" },
+            apiKey: { type: "string" },
+          },
+        },
+        WebhookPayload: {
+          type: "object",
+          description:
+            "Payload delivered to configured webhooks for incoming messages",
+          properties: {
+            chat: { $ref: "#/components/schemas/Chat" },
+            message: { $ref: "#/components/schemas/Message" },
+          },
+        },
+        WebhookResponse: {
+          type: "object",
+          properties: {
+            ok: { type: "boolean" },
+            webhook: { $ref: "#/components/schemas/WebhookConfig" },
+          },
         },
         User: {
           type: "object",
@@ -52,17 +81,17 @@ function createOpenApiDocument(config) {
             id: { type: "string" },
             name: { type: "string" },
             email: { type: "string", format: "email" },
-            createdAt: { type: "string", format: "date-time" }
+            createdAt: { type: "string", format: "date-time" },
           },
-          required: ["id", "name", "email", "createdAt"]
+          required: ["id", "name", "email", "createdAt"],
         },
         AuthResponse: {
           type: "object",
           properties: {
             token: { type: "string" },
-            user: { $ref: "#/components/schemas/User" }
+            user: { $ref: "#/components/schemas/User" },
           },
-          required: ["token", "user"]
+          required: ["token", "user"],
         },
         Session: {
           type: "object",
@@ -76,8 +105,8 @@ function createOpenApiDocument(config) {
             qrCode: { type: ["string", "null"] },
             errorMessage: { type: ["string", "null"] },
             createdAt: { type: "string", format: "date-time" },
-            updatedAt: { type: "string", format: "date-time" }
-          }
+            updatedAt: { type: "string", format: "date-time" },
+          },
         },
         Contact: {
           type: "object",
@@ -90,8 +119,8 @@ function createOpenApiDocument(config) {
             lastMessageAt: { type: ["string", "null"], format: "date-time" },
             unreadCount: { type: "integer" },
             sessionId: { type: ["string", "null"] },
-            hasChat: { type: "boolean" }
-          }
+            hasChat: { type: "boolean" },
+          },
         },
         MediaFile: {
           type: "object",
@@ -99,14 +128,14 @@ function createOpenApiDocument(config) {
             id: { type: "string" },
             originalName: { type: "string" },
             mimeType: { type: "string" },
-            relativePath: { type: "string" }
-          }
+            relativePath: { type: "string" },
+          },
         },
         MessageStatus: {
           type: "object",
           properties: {
-            status: { type: "string" }
-          }
+            status: { type: "string" },
+          },
         },
         Message: {
           type: "object",
@@ -122,13 +151,16 @@ function createOpenApiDocument(config) {
             createdAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
             mediaFile: {
-              anyOf: [{ $ref: "#/components/schemas/MediaFile" }, { type: "null" }]
+              anyOf: [
+                { $ref: "#/components/schemas/MediaFile" },
+                { type: "null" },
+              ],
             },
             statuses: {
               type: "array",
-              items: { $ref: "#/components/schemas/MessageStatus" }
-            }
-          }
+              items: { $ref: "#/components/schemas/MessageStatus" },
+            },
+          },
         },
         Chat: {
           type: "object",
@@ -138,12 +170,15 @@ function createOpenApiDocument(config) {
             sessionId: { type: ["string", "null"] },
             contact: { $ref: "#/components/schemas/Contact" },
             lastMessage: {
-              anyOf: [{ $ref: "#/components/schemas/Message" }, { type: "null" }]
+              anyOf: [
+                { $ref: "#/components/schemas/Message" },
+                { type: "null" },
+              ],
             },
-            updatedAt: { type: "string", format: "date-time" }
-          }
-        }
-      }
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+      },
     },
     paths: {
       "/health": {
@@ -160,21 +195,92 @@ function createOpenApiDocument(config) {
                     properties: {
                       ok: { type: "boolean" },
                       service: { type: "string" },
-                      version: { type: "string" }
+                      version: { type: "string" },
                     },
-                    required: ["ok", "service", "version"]
-                  }
-                }
-              }
-            }
-          }
-        }
+                    required: ["ok", "service", "version"],
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       "/version": {
         get: {
           tags: ["Runtime"],
           summary: "Get API version",
           responses: {
+            "/api/webhook": {
+              get: {
+                tags: ["Webhooks"],
+                summary: "Get current webhook configuration",
+                description:
+                  "Return the configured webhook for the authenticated user. Agents should use API keys to authenticate.",
+                operationId: "getWebhook",
+                security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
+                responses: {
+                  200: {
+                    description: "Webhook configuration",
+                    content: {
+                      "application/json": {
+                        schema: {
+                          $ref: "#/components/schemas/WebhookResponse",
+                        },
+                      },
+                    },
+                  },
+                },
+                "x-ai-agent-ready": true,
+              },
+              post: {
+                tags: ["Webhooks"],
+                summary: "Set or update webhook configuration",
+                description:
+                  "Configure an endpoint to receive incoming messages. The runtime will POST a JSON payload and include header `x-openwa-webhook-key` with the apiKey value.",
+                operationId: "setWebhook",
+                security: [{ bearerAuth: [] }],
+                requestBody: {
+                  required: true,
+                  content: {
+                    "application/json": {
+                      schema: { $ref: "#/components/schemas/WebhookConfig" },
+                      examples: {
+                        webhook: {
+                          summary: "Webhook example",
+                          value: {
+                            url: "https://example.com/openwa-webhook",
+                            apiKey: "S3CR3T",
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+                responses: {
+                  200: {
+                    description: "Saved webhook",
+                    content: {
+                      "application/json": {
+                        schema: {
+                          $ref: "#/components/schemas/WebhookResponse",
+                        },
+                      },
+                    },
+                  },
+                },
+                "x-ai-agent-ready": true,
+              },
+              delete: {
+                tags: ["Webhooks"],
+                summary: "Remove webhook configuration",
+                operationId: "deleteWebhook",
+                security: [{ bearerAuth: [] }],
+                responses: {
+                  200: { description: "Deleted" },
+                },
+                "x-ai-agent-ready": true,
+              },
+            },
             200: {
               description: "Package version",
               content: {
@@ -183,15 +289,15 @@ function createOpenApiDocument(config) {
                     type: "object",
                     properties: {
                       name: { type: "string" },
-                      version: { type: "string" }
+                      version: { type: "string" },
                     },
-                    required: ["name", "version"]
-                  }
-                }
-              }
-            }
-          }
-        }
+                    required: ["name", "version"],
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       "/docs/json": {
         get: {
@@ -199,10 +305,10 @@ function createOpenApiDocument(config) {
           summary: "Get OpenAPI document",
           responses: {
             200: {
-              description: "OpenAPI JSON document"
-            }
-          }
-        }
+              description: "OpenAPI JSON document",
+            },
+          },
+        },
       },
       "/docs/readme": {
         get: {
@@ -210,10 +316,10 @@ function createOpenApiDocument(config) {
           summary: "Get agent-friendly API usage guide",
           responses: {
             200: {
-              description: "Markdown guide for AI agents and external clients"
-            }
-          }
-        }
+              description: "Markdown guide for AI agents and external clients",
+            },
+          },
+        },
       },
       "/api/health": {
         get: {
@@ -221,16 +327,17 @@ function createOpenApiDocument(config) {
           summary: "Backend health alias",
           responses: {
             200: {
-              description: "Backend health status"
-            }
-          }
-        }
+              description: "Backend health status",
+            },
+          },
+        },
       },
       "/api/auth/register": {
         post: {
           tags: ["Auth"],
           summary: "Register a user",
-          description: "Dashboard-oriented auth. External agents should normally use an API key instead of calling register.",
+          description:
+            "Dashboard-oriented auth. External agents should normally use an API key instead of calling register.",
           requestBody: {
             required: true,
             content: {
@@ -240,38 +347,39 @@ function createOpenApiDocument(config) {
                   properties: {
                     name: { type: "string" },
                     email: { type: "string", format: "email" },
-                    password: { type: "string" }
+                    password: { type: "string" },
                   },
-                  required: ["name", "email", "password"]
-                }
-              }
-            }
+                  required: ["name", "email", "password"],
+                },
+              },
+            },
           },
           responses: {
             201: {
               description: "User registered",
               content: {
                 "application/json": {
-                  schema: { $ref: "#/components/schemas/AuthResponse" }
-                }
-              }
+                  schema: { $ref: "#/components/schemas/AuthResponse" },
+                },
+              },
             },
             400: {
               description: "Validation error",
               content: {
                 "application/json": {
-                  schema: { $ref: "#/components/schemas/ErrorResponse" }
-                }
-              }
-            }
-          }
-        }
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
       },
       "/api/auth/login": {
         post: {
           tags: ["Auth"],
           summary: "Login a user",
-          description: "Dashboard-oriented auth. External agents normally do not need this when an API key is already provided.",
+          description:
+            "Dashboard-oriented auth. External agents normally do not need this when an API key is already provided.",
           requestBody: {
             required: true,
             content: {
@@ -280,32 +388,32 @@ function createOpenApiDocument(config) {
                   type: "object",
                   properties: {
                     email: { type: "string", format: "email" },
-                    password: { type: "string" }
+                    password: { type: "string" },
                   },
-                  required: ["email", "password"]
-                }
-              }
-            }
+                  required: ["email", "password"],
+                },
+              },
+            },
           },
           responses: {
             200: {
               description: "User logged in",
               content: {
                 "application/json": {
-                  schema: { $ref: "#/components/schemas/AuthResponse" }
-                }
-              }
+                  schema: { $ref: "#/components/schemas/AuthResponse" },
+                },
+              },
             },
             400: {
               description: "Invalid credentials",
               content: {
                 "application/json": {
-                  schema: { $ref: "#/components/schemas/ErrorResponse" }
-                }
-              }
-            }
-          }
-        }
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
       },
       "/api/auth/me": {
         get: {
@@ -320,23 +428,23 @@ function createOpenApiDocument(config) {
                   schema: {
                     type: "object",
                     properties: {
-                      user: { $ref: "#/components/schemas/User" }
+                      user: { $ref: "#/components/schemas/User" },
                     },
-                    required: ["user"]
-                  }
-                }
-              }
+                    required: ["user"],
+                  },
+                },
+              },
             },
             401: {
               description: "Unauthorized",
               content: {
                 "application/json": {
-                  schema: { $ref: "#/components/schemas/ErrorResponse" }
-                }
-              }
-            }
-          }
-        }
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
       },
       "/api/api-keys": {
         get: {
@@ -345,9 +453,9 @@ function createOpenApiDocument(config) {
           security: [{ bearerAuth: [] }],
           responses: {
             200: {
-              description: "API key list"
-            }
-          }
+              description: "API key list",
+            },
+          },
         },
         post: {
           tags: ["Auth"],
@@ -360,19 +468,19 @@ function createOpenApiDocument(config) {
                 schema: {
                   type: "object",
                   properties: {
-                    name: { type: "string" }
+                    name: { type: "string" },
                   },
-                  required: ["name"]
-                }
-              }
-            }
+                  required: ["name"],
+                },
+              },
+            },
           },
           responses: {
             201: {
-              description: "Created API key"
-            }
-          }
-        }
+              description: "Created API key",
+            },
+          },
+        },
       },
       "/api/api-keys/{apiKeyId}": {
         delete: {
@@ -384,15 +492,15 @@ function createOpenApiDocument(config) {
               name: "apiKeyId",
               in: "path",
               required: true,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           responses: {
             200: {
-              description: "Revoked API key"
-            }
-          }
-        }
+              description: "Revoked API key",
+            },
+          },
+        },
       },
       "/api/bootstrap": {
         get: {
@@ -410,26 +518,26 @@ function createOpenApiDocument(config) {
                       user: { $ref: "#/components/schemas/User" },
                       sessions: {
                         type: "array",
-                        items: { $ref: "#/components/schemas/Session" }
+                        items: { $ref: "#/components/schemas/Session" },
                       },
                       chats: {
                         type: "array",
-                        items: { $ref: "#/components/schemas/Chat" }
+                        items: { $ref: "#/components/schemas/Chat" },
                       },
                       activeChatId: { type: ["string", "null"] },
                       messages: {
                         type: "array",
-                        items: { $ref: "#/components/schemas/Message" }
+                        items: { $ref: "#/components/schemas/Message" },
                       },
                       hasMoreMessages: { type: "boolean" },
-                      nextBefore: { type: ["string", "null"] }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
+                      nextBefore: { type: ["string", "null"] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       "/api/sessions": {
         get: {
@@ -438,9 +546,9 @@ function createOpenApiDocument(config) {
           security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
           responses: {
             200: {
-              description: "Session list"
-            }
-          }
+              description: "Session list",
+            },
+          },
         },
         post: {
           tags: ["Sessions"],
@@ -454,19 +562,19 @@ function createOpenApiDocument(config) {
                   type: "object",
                   properties: {
                     name: { type: "string" },
-                    phoneNumber: { type: "string" }
+                    phoneNumber: { type: "string" },
                   },
-                  required: ["name"]
-                }
-              }
-            }
+                  required: ["name"],
+                },
+              },
+            },
           },
           responses: {
             201: {
-              description: "Created session"
-            }
-          }
-        }
+              description: "Created session",
+            },
+          },
+        },
       },
       "/api/sessions/{sessionId}/connect": {
         post: {
@@ -478,15 +586,15 @@ function createOpenApiDocument(config) {
               name: "sessionId",
               in: "path",
               required: true,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           responses: {
             200: {
-              description: "Updated session"
-            }
-          }
-        }
+              description: "Updated session",
+            },
+          },
+        },
       },
       "/api/sessions/{sessionId}/disconnect": {
         post: {
@@ -498,15 +606,15 @@ function createOpenApiDocument(config) {
               name: "sessionId",
               in: "path",
               required: true,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           responses: {
             200: {
-              description: "Updated session"
-            }
-          }
-        }
+              description: "Updated session",
+            },
+          },
+        },
       },
       "/api/chats": {
         get: {
@@ -518,21 +626,21 @@ function createOpenApiDocument(config) {
               name: "sessionId",
               in: "query",
               required: false,
-              schema: { type: "string" }
+              schema: { type: "string" },
             },
             {
               name: "q",
               in: "query",
               required: false,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           responses: {
             200: {
-              description: "Chat list"
-            }
-          }
-        }
+              description: "Chat list",
+            },
+          },
+        },
       },
       "/api/contacts": {
         get: {
@@ -544,21 +652,21 @@ function createOpenApiDocument(config) {
               name: "sessionId",
               in: "query",
               required: false,
-              schema: { type: "string" }
+              schema: { type: "string" },
             },
             {
               name: "q",
               in: "query",
               required: false,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           responses: {
             200: {
-              description: "Contact list"
-            }
-          }
-        }
+              description: "Contact list",
+            },
+          },
+        },
       },
       "/api/contacts/{contactId}/open": {
         post: {
@@ -570,15 +678,15 @@ function createOpenApiDocument(config) {
               name: "contactId",
               in: "path",
               required: true,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           responses: {
             200: {
-              description: "Opened chat"
-            }
-          }
-        }
+              description: "Opened chat",
+            },
+          },
+        },
       },
       "/api/chats/{chatId}/messages": {
         get: {
@@ -590,47 +698,48 @@ function createOpenApiDocument(config) {
               name: "chatId",
               in: "path",
               required: true,
-              schema: { type: "string" }
+              schema: { type: "string" },
             },
             {
               name: "take",
               in: "query",
               required: false,
-              schema: { type: "integer" }
+              schema: { type: "integer" },
             },
             {
               name: "before",
               in: "query",
               required: false,
-              schema: { type: "string", format: "date-time" }
+              schema: { type: "string", format: "date-time" },
             },
             {
               name: "search",
               in: "query",
               required: false,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           responses: {
             200: {
-              description: "Messages payload"
-            }
-          }
-        }
+              description: "Messages payload",
+            },
+          },
+        },
       },
       "/api/chats/{chatId}/messages/send": {
         post: {
           tags: ["Messages"],
           summary: "Send a message over HTTP",
-          description: "Preferred for AI agents and external clients that do not use Socket.IO. Supports text messages directly and media messages via an uploaded `mediaFileId`.",
+          description:
+            "Preferred for AI agents and external clients that do not use Socket.IO. Supports text messages directly and media messages via an uploaded `mediaFileId`.",
           security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
           parameters: [
             {
               name: "chatId",
               in: "path",
               required: true,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           requestBody: {
             required: true,
@@ -640,29 +749,39 @@ function createOpenApiDocument(config) {
                   type: "object",
                   properties: {
                     body: { type: "string" },
-                    type: { type: "string", enum: ["text", "image", "video", "audio", "document", "sticker"] },
+                    type: {
+                      type: "string",
+                      enum: [
+                        "text",
+                        "image",
+                        "video",
+                        "audio",
+                        "document",
+                        "sticker",
+                      ],
+                    },
                     mediaFileId: { type: "string" },
-                    replyToId: { type: "string" }
-                  }
+                    replyToId: { type: "string" },
+                  },
                 },
                 examples: {
                   textMessage: {
                     summary: "Send a text message",
                     value: {
                       body: "Halo dari agent",
-                      type: "text"
-                    }
-                  }
-                }
-              }
-            }
+                      type: "text",
+                    },
+                  },
+                },
+              },
+            },
           },
           responses: {
             200: {
-              description: "Sent message payload"
-            }
-          }
-        }
+              description: "Sent message payload",
+            },
+          },
+        },
       },
       "/api/messages/{messageId}": {
         delete: {
@@ -674,15 +793,15 @@ function createOpenApiDocument(config) {
               name: "messageId",
               in: "path",
               required: true,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           responses: {
             200: {
-              description: "Delete result"
-            }
-          }
-        }
+              description: "Delete result",
+            },
+          },
+        },
       },
       "/api/messages/{messageId}/forward": {
         post: {
@@ -694,8 +813,8 @@ function createOpenApiDocument(config) {
               name: "messageId",
               in: "path",
               required: true,
-              schema: { type: "string" }
-            }
+              schema: { type: "string" },
+            },
           ],
           requestBody: {
             required: true,
@@ -704,19 +823,19 @@ function createOpenApiDocument(config) {
                 schema: {
                   type: "object",
                   properties: {
-                    targetChatId: { type: "string" }
+                    targetChatId: { type: "string" },
                   },
-                  required: ["targetChatId"]
-                }
-              }
-            }
+                  required: ["targetChatId"],
+                },
+              },
+            },
           },
           responses: {
             200: {
-              description: "Forward result"
-            }
-          }
-        }
+              description: "Forward result",
+            },
+          },
+        },
       },
       "/api/media": {
         post: {
@@ -732,22 +851,22 @@ function createOpenApiDocument(config) {
                   properties: {
                     file: {
                       type: "string",
-                      format: "binary"
-                    }
+                      format: "binary",
+                    },
                   },
-                  required: ["file"]
-                }
-              }
-            }
+                  required: ["file"],
+                },
+              },
+            },
           },
           responses: {
             201: {
-              description: "Uploaded media metadata"
-            }
-          }
-        }
-      }
-    }
+              description: "Uploaded media metadata",
+            },
+          },
+        },
+      },
+    },
   };
 }
 
@@ -792,7 +911,14 @@ Agents do **not** need to log in through dashboard auth endpoints as long as the
    - \`GET /api/chats/:chatId/messages\`
    - \`GET /api/chats/:chatId/messages?search=keyword\`
 6. Send a message:
-   - \`POST /api/chats/:chatId/messages/send\`
+  - \`POST /api/chats/:chatId/messages/send\`
+
+7. Configure webhooks (optional)
+  - \`GET /api/webhook\` — read current webhook configuration
+  - \`POST /api/webhook\` — set webhook { "url": "https://...", "apiKey": "..." }
+  - \`DELETE /api/webhook\` — remove the webhook
+
+When an incoming message arrives the runtime will \`POST\` a JSON payload to your configured URL with header \`x-openwa-webhook-key\` set to the \`apiKey\` you provided. The payload contains \`chat\` and \`message\` objects described in the OpenAPI schemas.
 
 ## Important notes
 
@@ -844,10 +970,75 @@ function createSwaggerHtml() {
 </html>`;
 }
 
+function createAgentReadme(config, apiKeySecret) {
+  const keyBlock = apiKeySecret
+    ? `\n\n## API Key (auto-generated)\n\nUse this API key for agent requests:\n\n\`X-API-Key: ${apiKeySecret}\`\n\nor\n\n\`Authorization: Bearer ${apiKeySecret}\`\n`
+    : "";
+
+  return `# OpenWA Agent Guide
+
+Recommended base URL for agents:
+
+- ${config.frontendUrl}
+
+Use the frontend URL because docs and runtime metadata endpoints are already proxied to the backend.
+
+## Authentication
+
+Use either of these headers:
+
+\`\`\`
+X-API-Key: <api-key>
+\`\`\`
+
+or
+
+\`\`\`
+Authorization: Bearer <api-key>
+\`\`\`
+
+Agents do **not** need to log in through dashboard auth endpoints as long as they already have an API key.
+
+${keyBlock}
+
+## Quick start
+
+1. Check runtime availability:
+  - \`GET /health\`
+  - \`GET /version\`
+2. Fetch the machine-readable specification:
+  - \`GET /docs/json\`
+3. Read chats and contacts:
+  - \`GET /api/chats\`
+  - \`GET /api/contacts\`
+4. Open or create a chat from a contact:
+  - \`POST /api/contacts/:contactId/open\`
+5. Read or search messages:
+  - \`GET /api/chats/:chatId/messages\`
+  - \`GET /api/chats/:chatId/messages?search=keyword\`
+6. Send a message:
+  - \`POST /api/chats/:chatId/messages/send\`
+
+7. Configure webhooks (optional)
+  - \`GET /api/webhook\` — read current webhook configuration
+  - \`POST /api/webhook\` — set webhook { "url": "https://...", "apiKey": "..." }
+  - \`DELETE /api/webhook\` — remove the webhook
+
+When an incoming message arrives the runtime will \`POST\` a JSON payload to your configured URL with header \`x-openwa-webhook-key\` set to the \`apiKey\` you provided. The payload contains \`chat\` and \`message\` objects described in the OpenAPI schemas.
+
+## Important notes
+
+ - \`/api/auth/register\` and \`/api/auth/login\` are meant for dashboard or human login flows, not the normal agent flow.
+ - API keys are created from the OpenWA dashboard under **Settings → API Access**.
+ - For media messages, upload the file to \`POST /api/media\` first, then send the returned \`mediaFileId\` through the HTTP send message endpoint.
+ - Main business endpoints accept JWT **or** API key authentication, but API key management endpoints only accept dashboard JWT authentication.
+`;
+}
+
 module.exports = {
   createOpenApiDocument,
   createAgentReadme,
   createSwaggerHtml,
   packageVersion: packageJson.version,
-  packageName: packageJson.name
+  packageName: packageJson.name,
 };

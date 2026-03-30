@@ -54,6 +54,10 @@ export default function DashboardPage() {
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
   const [apiKeyName, setApiKeyName] = useState("");
   const [apiKeySecret, setApiKeySecret] = useState("");
+  const [revokingKeyId, setRevokingKeyId] = useState(null);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookApiKey, setWebhookApiKey] = useState("");
+  const [webhookLoading, setWebhookLoading] = useState(false);
   const [startingContactId, setStartingContactId] = useState(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [contactsPanelOpen, setContactsPanelOpen] = useState(false);
@@ -149,6 +153,23 @@ export default function DashboardPage() {
       },
     );
   }, [loadApiKeys, loadContacts, loadWorkspace, router, token]);
+
+  useEffect(() => {
+    if (settingsOpen) {
+      // load webhook config when settings open
+      (async function load() {
+        if (!token) return;
+        try {
+          const data = await apiFetch("/api/webhook", { token });
+          const cfg = data.webhook || {};
+          setWebhookUrl(cfg.url || "");
+          setWebhookApiKey(cfg.apiKey || "");
+        } catch (err) {
+          // ignore
+        }
+      })();
+    }
+  }, [settingsOpen, token]);
 
   useEffect(() => {
     if (!activeSessionId && sessions[0]?.id) {
@@ -349,7 +370,7 @@ export default function DashboardPage() {
   const handleCreateApiKey = async (event) => {
     event.preventDefault();
     setError("");
-
+    setApiKeysLoading(true);
     try {
       const result = await apiFetch("/api/api-keys", {
         method: "POST",
@@ -365,12 +386,47 @@ export default function DashboardPage() {
       setSettingsOpen(true);
     } catch (requestError) {
       setError(requestError.message);
+    } finally {
+      setApiKeysLoading(false);
+    }
+  };
+
+  const handleSaveWebhook = async () => {
+    setWebhookLoading(true);
+    setError("");
+    try {
+      const result = await apiFetch("/api/webhook", {
+        method: "POST",
+        token,
+        body: { url: webhookUrl, apiKey: webhookApiKey },
+      });
+
+      setWebhookUrl(result.webhook?.url || "");
+      setWebhookApiKey(result.webhook?.apiKey || "");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setWebhookLoading(false);
+    }
+  };
+
+  const handleDeleteWebhook = async () => {
+    setWebhookLoading(true);
+    setError("");
+    try {
+      await apiFetch("/api/webhook", { method: "DELETE", token });
+      setWebhookUrl("");
+      setWebhookApiKey("");
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setWebhookLoading(false);
     }
   };
 
   const handleRevokeApiKey = async (apiKeyId) => {
     setError("");
-
+    setRevokingKeyId(apiKeyId);
     try {
       await apiFetch(`/api/api-keys/${apiKeyId}`, {
         method: "DELETE",
@@ -380,6 +436,8 @@ export default function DashboardPage() {
       setApiKeys((current) => current.filter((item) => item.id !== apiKeyId));
     } catch (requestError) {
       setError(requestError.message);
+    } finally {
+      setRevokingKeyId(null);
     }
   };
 
@@ -656,6 +714,14 @@ export default function DashboardPage() {
         onApiKeyNameChange={setApiKeyName}
         onCreateApiKey={handleCreateApiKey}
         onRevokeApiKey={handleRevokeApiKey}
+        revokingKeyId={revokingKeyId}
+        webhookUrl={webhookUrl}
+        webhookApiKey={webhookApiKey}
+        onWebhookUrlChange={setWebhookUrl}
+        onWebhookApiKeyChange={setWebhookApiKey}
+        onSaveWebhook={handleSaveWebhook}
+        onDeleteWebhook={handleDeleteWebhook}
+        webhookLoading={webhookLoading}
       />
     </>
   );

@@ -126,11 +126,23 @@ async function startOpenWA({ dev = false } = {}) {
     io.to(userRoom(payload.userId)).emit("session_status_update", payload);
   });
 
+  const { notifyWebhook } = require("./services/webhook-service");
+
   sessionManager.on("incoming-message", async (payload) => {
     try {
       const result = await chatService.storeIncomingMessage(payload);
       io.to(userRoom(payload.userId)).emit("new_message", result.message);
       io.to(userRoom(payload.userId)).emit("contact_list_update", result.chat);
+
+      // Fire user-configured webhook (best-effort)
+      try {
+        await notifyWebhook(payload.userId, {
+          chat: result.chat,
+          message: result.message,
+        });
+      } catch (err) {
+        console.error("Webhook delivery failed:", err);
+      }
     } catch (error) {
       console.error("Failed to persist incoming WhatsApp message.", error);
     }

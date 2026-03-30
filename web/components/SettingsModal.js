@@ -73,6 +73,14 @@ export function SettingsModal({
   onApiKeyNameChange,
   onCreateApiKey,
   onRevokeApiKey,
+  revokingKeyId,
+  webhookUrl,
+  webhookApiKey,
+  onWebhookUrlChange,
+  onWebhookApiKeyChange,
+  onSaveWebhook,
+  onDeleteWebhook,
+  webhookLoading,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -282,6 +290,19 @@ export function SettingsModal({
                     Use with external agents via `X-API-Key` header or
                     `Authorization: Bearer &lt;api-key&gt;`.
                   </p>
+                  <p className="mt-3 text-sm leading-6 text-white/45">
+                    Webhooks: forward incoming messages to your endpoint. See
+                    the
+                    <a
+                      href="/docs/readme#webhooks"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-1 font-medium text-brand-300 underline"
+                    >
+                      webhook documentation
+                    </a>
+                    for payload details and agent integration.
+                  </p>
                 </div>
               </div>
 
@@ -318,8 +339,9 @@ export function SettingsModal({
                 <button
                   type="submit"
                   className="shrink-0 rounded-[22px] bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+                  disabled={apiKeysLoading}
                 >
-                  Generate
+                  {apiKeysLoading ? "Generating..." : "Generate"}
                 </button>
               </form>
 
@@ -355,8 +377,9 @@ export function SettingsModal({
                         type="button"
                         className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-red-200 transition hover:bg-red-500/15"
                         onClick={() => onRevokeApiKey(apiKey.id)}
+                        disabled={apiKeysLoading || revokingKeyId === apiKey.id}
                       >
-                        Revoke
+                        {revokingKeyId === apiKey.id ? "Revoking..." : "Revoke"}
                       </button>
                     </div>
                     <div className="mt-3 grid gap-2 text-xs text-white/40">
@@ -366,6 +389,61 @@ export function SettingsModal({
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="mt-5 rounded-[28px] bg-[#161717] p-4">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+                Webhooks
+              </p>
+              <h3 className="mt-2 text-base font-semibold text-white">
+                Incoming message webhook
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-white/45">
+                Forward incoming messages to this endpoint. The runtime will
+                POST a JSON payload and include header{" "}
+                <span className="font-mono">x-openwa-webhook-key</span> with the
+                value you provide.
+              </p>
+
+              <form
+                className="mt-4 space-y-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  onSaveWebhook();
+                }}
+              >
+                <input
+                  className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                  placeholder="https://example.com/openwa-webhook"
+                  value={webhookUrl || ""}
+                  onChange={(e) => onWebhookUrlChange(e.target.value)}
+                />
+
+                <input
+                  className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                  placeholder="Optional webhook API key (sent as x-openwa-webhook-key)"
+                  value={webhookApiKey || ""}
+                  onChange={(e) => onWebhookApiKeyChange(e.target.value)}
+                />
+
+                <div className="flex gap-2">
+                  <button
+                    type="submit"
+                    className="rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+                    disabled={webhookLoading}
+                  >
+                    {webhookLoading ? "Saving..." : "Save webhook"}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-2xl bg-red-700 px-4 py-3 text-sm text-white/90"
+                    onClick={() => onDeleteWebhook()}
+                    disabled={webhookLoading}
+                  >
+                    {webhookLoading ? "Removing..." : "Remove webhook"}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>

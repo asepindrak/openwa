@@ -12,6 +12,7 @@ const {
 const apiKeyService = require("../services/api-key-service");
 const chatService = require("../services/chat-service");
 const sessionService = require("../services/session-service");
+const webhookService = require("../services/webhook-service");
 const {
   createAgentReadme,
   createOpenApiDocument,
@@ -121,7 +122,44 @@ function createApp({ config, sessionManager }) {
   });
 
   app.get("/docs/readme", (req, res) => {
-    res.type("text/markdown").send(createAgentReadme(config));
+    (async () => {
+      try {
+        // If the requester presents a dashboard JWT, create a convenience API key
+        // so the README can include a usable secret for agent workflows.
+        const header = req.headers.authorization || "";
+        const bearer = header.startsWith("Bearer ") ? header.slice(7) : null;
+        let secret = null;
+
+        if (bearer) {
+          try {
+            const { getUserFromToken } = require("../services/auth-service");
+            const user = await getUserFromToken(bearer, config);
+            if (user) {
+              // create a short-lived API key for agent onboarding
+              const apiKeyName = `agent-readme-${Date.now()}`;
+              try {
+                const result = await apiKeyService.createApiKey(user.id, {
+                  name: apiKeyName,
+                });
+                secret = result.secret;
+              } catch (e) {
+                // fall back silently if creation fails
+                console.warn(
+                  "Failed to create agent readme API key:",
+                  e.message || e,
+                );
+              }
+            }
+          } catch (e) {
+            // ignore token parse errors
+          }
+        }
+
+        res.type("text/markdown").send(createAgentReadme(config, secret));
+      } catch (err) {
+        res.type("text/markdown").send(createAgentReadme(config));
+      }
+    })();
   });
 
   app.get("/health", (req, res) => {
@@ -225,6 +263,38 @@ function createApp({ config, sessionManager }) {
         res.status(404).json({ error: error.message });
       }
     },
+  );
+
+  app.get(
+    "/api/webhook",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const cfg = webhookService.getWebhook(req.user.id);
+      res.json({ webhook: cfg });
+    }),
+  );
+
+  app.post(
+    "/api/webhook",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const { url, apiKey } = req.body || {};
+      if (!url) {
+        return res.status(400).json({ error: "url is required" });
+      }
+
+      const cfg = webhookService.setWebhook(req.user.id, { url, apiKey });
+      res.json({ ok: true, webhook: cfg });
+    }),
+  );
+
+  app.delete(
+    "/api/webhook",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      webhookService.deleteWebhook(req.user.id);
+      res.json({ ok: true });
+    }),
   );
 
   app.get("/api/bootstrap", requireAuth, async (req, res) => {
