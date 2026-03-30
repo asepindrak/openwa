@@ -15,7 +15,7 @@ class WwebjsAdapter extends EventEmitter {
       return {
         url: null,
         status: "missing",
-        reason: "client-not-ready-or-empty-id"
+        reason: "client-not-ready-or-empty-id",
       };
     }
 
@@ -28,30 +28,37 @@ class WwebjsAdapter extends EventEmitter {
           profilePic = await window.Store.ProfilePic.profilePicFind(chatWid);
         }
 
-        if (!profilePic && typeof window.Store.ProfilePic.requestProfilePicFromServer === "function") {
-          profilePic = await window.Store.ProfilePic.requestProfilePicFromServer(chatWid);
+        if (
+          !profilePic &&
+          typeof window.Store.ProfilePic.requestProfilePicFromServer ===
+            "function"
+        ) {
+          profilePic =
+            await window.Store.ProfilePic.requestProfilePicFromServer(chatWid);
         }
 
-        return profilePic?.eurl || profilePic?.imgFull || profilePic?.img || null;
+        return (
+          profilePic?.eurl || profilePic?.imgFull || profilePic?.img || null
+        );
       } catch (error) {
         const message = String(error?.message || error || "");
         if (message.includes("isNewsletter")) {
           return {
-            __status: "newsletter-guard"
+            __status: "newsletter-guard",
           };
         }
 
         if (error?.name === "ServerStatusCodeError") {
           return {
-            __status: "server-status"
+            __status: "server-status",
           };
         }
 
         return {
           __error: {
             name: String(error?.name || "Error"),
-            message
-          }
+            message,
+          },
         };
       }
     }, externalId);
@@ -61,7 +68,7 @@ class WwebjsAdapter extends EventEmitter {
         url: null,
         status: "error",
         reason: result.__error.message,
-        errorName: result.__error.name
+        errorName: result.__error.name,
       };
     }
 
@@ -69,7 +76,7 @@ class WwebjsAdapter extends EventEmitter {
       return {
         url: null,
         status: "newsletterGuard",
-        reason: "wwebjs-newsletter-guard"
+        reason: "wwebjs-newsletter-guard",
       };
     }
 
@@ -77,7 +84,7 @@ class WwebjsAdapter extends EventEmitter {
       return {
         url: null,
         status: "serverStatus",
-        reason: "server-status-code-error"
+        reason: "server-status-code-error",
       };
     }
 
@@ -85,21 +92,23 @@ class WwebjsAdapter extends EventEmitter {
       return {
         url: null,
         status: "missing",
-        reason: "no-profile-photo-returned"
+        reason: "no-profile-photo-returned",
       };
     }
 
     return {
       url: result,
       status: "found",
-      reason: "profile-photo-found"
+      reason: "profile-photo-found",
     };
   }
 
   async resolveProfilePicUrl(externalId) {
     const result = await this.resolveProfilePic(externalId);
     if (result.status === "error") {
-      console.warn(`Failed to fetch WhatsApp profile photo for ${externalId}: ${result.reason}`);
+      console.warn(
+        `Failed to fetch WhatsApp profile photo for ${externalId}: ${result.reason}`,
+      );
     }
 
     return result.url;
@@ -111,12 +120,12 @@ class WwebjsAdapter extends EventEmitter {
     this.client = new Client({
       authStrategy: new LocalAuth({
         clientId: this.session.id,
-        dataPath: sessionsDir
+        dataPath: sessionsDir,
       }),
       puppeteer: {
         headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"]
-      }
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      },
     });
 
     this.client.on("qr", async (qr) => {
@@ -136,7 +145,7 @@ class WwebjsAdapter extends EventEmitter {
       this.emit("status", {
         status: "disconnected",
         transportType: "wwebjs",
-        lastError: typeof reason === "string" ? reason : "Disconnected"
+        lastError: typeof reason === "string" ? reason : "Disconnected",
       });
     });
 
@@ -144,26 +153,69 @@ class WwebjsAdapter extends EventEmitter {
       this.emit("status", {
         status: "error",
         transportType: "wwebjs",
-        lastError: message
+        lastError: message,
       });
     });
+
+    const fs = require("fs");
+    const { v4: uuidv4 } = require("uuid");
+    const { storeIncomingMessage } = require("../../services/chat-service");
+    const { prisma } = require("../../database/client");
+    const mediaDir = path.join(rootDir, "storage", "media");
 
     this.client.on("message", (message) => {
       void (async () => {
         const chatId = String(message.from || "");
         const isPrivateChat = chatId.endsWith("@c.us");
         const isGroupChat = chatId.endsWith("@g.us");
+        if (!isPrivateChat && !isGroupChat) return;
 
-        if (!isPrivateChat && !isGroupChat) {
-          return;
+        let mediaFileId = null;
+        let type = message.type || "text";
+        let body = message.body;
+
+        if (message.hasMedia) {
+          try {
+            const media = await message.downloadMedia();
+            if (media && media.data) {
+              if (!fs.existsSync(mediaDir))
+                fs.mkdirSync(mediaDir, { recursive: true });
+              const ext = media.mimetype.split("/")[1] || "bin";
+              const filename = `${uuidv4()}.${ext}`;
+              const filePath = path.join(mediaDir, filename);
+              fs.writeFileSync(filePath, Buffer.from(media.data, "base64"));
+              // Create media_files entry
+              const mediaFile = await prisma.mediaFile.create({
+                data: {
+                  userId: this.session.userId,
+                  fileName: filename,
+                  originalName: filename,
+                  mimeType: media.mimetype,
+                  size: Buffer.from(media.data, "base64").length,
+                  relativePath: `media/${filename}`,
+                },
+              });
+              mediaFileId = mediaFile.id;
+              type = message.type;
+              // For images/videos, body is usually caption
+              if (media.caption) body = media.caption;
+            }
+          } catch (err) {
+            console.error("Failed to download WhatsApp media:", err);
+          }
         }
 
-        this.emit("message", {
+        // Emit to backend (store in DB)
+        await storeIncomingMessage({
+          userId: this.session.userId,
+          sessionId: this.session.id,
           sender: chatId,
-          displayName: message._data?.notifyName || message._data?.pushname || chatId,
+          displayName:
+            message._data?.notifyName || message._data?.pushname || chatId,
           avatarUrl: await this.resolveProfilePicUrl(chatId),
-          body: message.body,
-          type: "text"
+          body,
+          type,
+          mediaFileId,
         });
       })().catch((error) => {
         console.error("Failed to process incoming WhatsApp message.", error);
@@ -186,7 +238,10 @@ class WwebjsAdapter extends EventEmitter {
       throw new Error("WhatsApp client is not ready.");
     }
 
-    const [contacts, chats] = await Promise.all([this.client.getContacts(), this.client.getChats()]);
+    const [contacts, chats] = await Promise.all([
+      this.client.getContacts(),
+      this.client.getChats(),
+    ]);
     const contactSnapshots = await Promise.all(
       contacts.map(async (contact) => {
         const externalId = contact.id?._serialized || "";
@@ -196,11 +251,16 @@ class WwebjsAdapter extends EventEmitter {
           externalId,
           name: contact.name || contact.shortName || "",
           pushname: contact.pushname || contact.name || "",
-          avatarUrl: avatarResult.url
+          avatarUrl: avatarResult.url,
         };
-      })
+      }),
     );
-    const contactAvatarMap = new Map(contactSnapshots.map((contact) => [contact.externalId, contact.avatarUrl]));
+    const contactAvatarMap = new Map(
+      contactSnapshots.map((contact) => [
+        contact.externalId,
+        contact.avatarUrl,
+      ]),
+    );
     const chatSnapshots = [];
 
     for (const chat of chats) {
@@ -211,7 +271,11 @@ class WwebjsAdapter extends EventEmitter {
 
       const messages = await chat.fetchMessages({ limit: 50 });
       const chatAvatarResult = contactAvatarMap.get(externalId)
-        ? { url: contactAvatarMap.get(externalId), status: "found", reason: "reused-contact-avatar" }
+        ? {
+            url: contactAvatarMap.get(externalId),
+            status: "found",
+            reason: "reused-contact-avatar",
+          }
         : await this.resolveProfilePic(externalId);
 
       chatSnapshots.push({
@@ -221,19 +285,23 @@ class WwebjsAdapter extends EventEmitter {
         avatarUrl: chatAvatarResult.url,
         messages: messages.map((message) => ({
           externalMessageId: message.id?._serialized || null,
-          sender: message.fromMe ? `user:${this.session.userId}` : message.author || message.from || externalId,
+          sender: message.fromMe
+            ? `user:${this.session.userId}`
+            : message.author || message.from || externalId,
           body: message.body || null,
           type: message.type,
           direction: message.fromMe ? "outbound" : "inbound",
           ack: message.ack ?? 0,
-          createdAt: new Date((message.timestamp || Math.floor(Date.now() / 1000)) * 1000).toISOString()
-        }))
+          createdAt: new Date(
+            (message.timestamp || Math.floor(Date.now() / 1000)) * 1000,
+          ).toISOString(),
+        })),
       });
     }
 
     return {
       contacts: contactSnapshots,
-      chats: chatSnapshots
+      chats: chatSnapshots,
     };
   }
 
@@ -247,15 +315,22 @@ class WwebjsAdapter extends EventEmitter {
       const mediaPath = path.join(rootDir, "storage", payload.mediaPath || "");
 
       const media = MessageMedia.fromFilePath(mediaPath);
-      const response = await this.client.sendMessage(payload.recipient, media, payload.body ? { caption: payload.body } : undefined);
+      const response = await this.client.sendMessage(
+        payload.recipient,
+        media,
+        payload.body ? { caption: payload.body } : undefined,
+      );
       return {
-        externalMessageId: response.id?._serialized || null
+        externalMessageId: response.id?._serialized || null,
       };
     }
 
-    const response = await this.client.sendMessage(payload.recipient, payload.body || "");
+    const response = await this.client.sendMessage(
+      payload.recipient,
+      payload.body || "",
+    );
     return {
-      externalMessageId: response.id?._serialized || null
+      externalMessageId: response.id?._serialized || null,
     };
   }
 }

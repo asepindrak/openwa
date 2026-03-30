@@ -33,7 +33,10 @@ class SessionManager extends EventEmitter {
   }
 
   async hydrate(sessions) {
-    const reconnectable = sessions.filter((session) => session.status === "ready" || session.status === "connecting");
+    const reconnectable = sessions.filter(
+      (session) =>
+        session.status === "ready" || session.status === "connecting",
+    );
     for (const session of reconnectable) {
       await this.connectSession(session.userId, session.id);
     }
@@ -69,7 +72,7 @@ class SessionManager extends EventEmitter {
       status: "connecting",
       qrCode: null,
       lastError: null,
-      transportType: this.config.useWwebjs ? "wwebjs" : "mock"
+      transportType: this.config.useWwebjs ? "wwebjs" : "mock",
     });
 
     const candidates = [];
@@ -77,19 +80,21 @@ class SessionManager extends EventEmitter {
     if (this.config.useWwebjs) {
       candidates.push({
         adapter: new WwebjsAdapter({ session }),
-        transportType: "wwebjs"
+        transportType: "wwebjs",
       });
     }
 
     if (this.config.allowMockAdapter) {
       candidates.push({
         adapter: new MockAdapter({ session }),
-        transportType: "mock"
+        transportType: "mock",
       });
     }
 
     if (candidates.length === 0) {
-      throw new Error("No WhatsApp transport is enabled. Enable whatsapp-web.js or set OPENWA_ALLOW_MOCK=true for mock mode.");
+      throw new Error(
+        "No WhatsApp transport is enabled. Enable whatsapp-web.js or set OPENWA_ALLOW_MOCK=true for mock mode.",
+      );
     }
 
     let previousError = null;
@@ -99,18 +104,23 @@ class SessionManager extends EventEmitter {
         this.attachAdapter({
           session,
           adapter: candidate.adapter,
-          transportType: candidate.transportType
+          transportType: candidate.transportType,
         });
 
         await sessionService.touchSessionState(session.id, {
           status: "connecting",
           transportType: candidate.transportType,
-          lastError: previousError
+          lastError: previousError,
         });
 
         await candidate.adapter.connect();
         return candidate.adapter;
       } catch (error) {
+        // DEBUG: Print full error stack for diagnosis
+        console.error(
+          "[OpenWA] Adapter connect error:",
+          error && error.stack ? error.stack : error,
+        );
         this.adapters.delete(session.id);
         candidate.adapter.removeAllListeners();
         try {
@@ -125,7 +135,7 @@ class SessionManager extends EventEmitter {
     await sessionService.touchSessionState(session.id, {
       status: "error",
       qrCode: null,
-      lastError: previousError
+      lastError: previousError,
     });
 
     this.emit("session-status", {
@@ -134,106 +144,122 @@ class SessionManager extends EventEmitter {
       sessionId: session.id,
       status: "error",
       lastError: previousError,
-      qrCode: null
+      qrCode: null,
     });
 
     throw new Error(previousError || "Unable to connect session.");
   }
 
   attachAdapter({ session, adapter, transportType }) {
-    adapter.on("qr", safeAsyncListener(async (payload) => {
-      this.queueQrStatePersist(session.id, {
-        status: "connecting",
-        qrCode: payload.qrCode,
-        transportType: payload.transportType || transportType
-      });
+    adapter.on(
+      "qr",
+      safeAsyncListener(async (payload) => {
+        this.queueQrStatePersist(session.id, {
+          status: "connecting",
+          qrCode: payload.qrCode,
+          transportType: payload.transportType || transportType,
+        });
 
-      this.emit("session-status", {
-        id: session.id,
-        userId: session.userId,
-        sessionId: session.id,
-        status: "connecting",
-        qrCode: payload.qrCode,
-        transportType: payload.transportType || transportType
-      });
-    }, "qr"));
+        this.emit("session-status", {
+          id: session.id,
+          userId: session.userId,
+          sessionId: session.id,
+          status: "connecting",
+          qrCode: payload.qrCode,
+          transportType: payload.transportType || transportType,
+        });
+      }, "qr"),
+    );
 
-    adapter.on("status", safeAsyncListener(async (payload) => {
-      const nextQrCode = payload.status === "ready" || payload.status === "disconnected" || payload.status === "error"
-        ? null
-        : undefined;
+    adapter.on(
+      "status",
+      safeAsyncListener(async (payload) => {
+        const nextQrCode =
+          payload.status === "ready" ||
+          payload.status === "disconnected" ||
+          payload.status === "error"
+            ? null
+            : undefined;
 
-      if (payload.status === "ready") {
-        this.clearRetry(session.id);
-      }
-
-      if (payload.status === "ready" || payload.status === "disconnected" || payload.status === "error") {
-        this.clearQueuedQrPersist(session.id);
-      }
-
-      await sessionService.touchSessionState(session.id, {
-        status: payload.status,
-        transportType: payload.transportType || transportType,
-        lastError: payload.lastError || null,
-        qrCode: nextQrCode
-      });
-
-      this.emit("session-status", {
-        id: session.id,
-        userId: session.userId,
-        sessionId: session.id,
-        status: payload.status,
-        transportType: payload.transportType || transportType,
-        lastError: payload.lastError || null,
-        qrCode: nextQrCode
-      });
-
-      if (payload.status === "ready" && typeof adapter.getSyncSnapshot === "function") {
-        try {
-          const snapshot = await adapter.getSyncSnapshot();
-          await chatService.syncWhatsappSnapshot({
-            userId: session.userId,
-            sessionId: session.id,
-            contacts: snapshot.contacts,
-            chats: snapshot.chats
-          });
-
-          this.emit("workspace-sync", {
-            id: session.id,
-            userId: session.userId,
-            sessionId: session.id
-          });
-        } catch (error) {
-          const lastError = `WhatsApp sync failed: ${error.message}`;
-          await sessionService.touchSessionState(session.id, {
-            lastError
-          });
-
-          this.emit("session-status", {
-            id: session.id,
-            userId: session.userId,
-            sessionId: session.id,
-            status: payload.status,
-            transportType: payload.transportType || transportType,
-            lastError,
-            qrCode: nextQrCode
-          });
+        if (payload.status === "ready") {
+          this.clearRetry(session.id);
         }
-      }
 
-      if (payload.status === "disconnected" || payload.status === "error") {
-        this.adapters.delete(session.id);
-        if (!this.manualDisconnects.has(session.id)) {
-          this.scheduleReconnect(session.userId, session.id, payload.status);
+        if (
+          payload.status === "ready" ||
+          payload.status === "disconnected" ||
+          payload.status === "error"
+        ) {
+          this.clearQueuedQrPersist(session.id);
         }
-      }
-    }, "status"));
+
+        await sessionService.touchSessionState(session.id, {
+          status: payload.status,
+          transportType: payload.transportType || transportType,
+          lastError: payload.lastError || null,
+          qrCode: nextQrCode,
+        });
+
+        this.emit("session-status", {
+          id: session.id,
+          userId: session.userId,
+          sessionId: session.id,
+          status: payload.status,
+          transportType: payload.transportType || transportType,
+          lastError: payload.lastError || null,
+          qrCode: nextQrCode,
+        });
+
+        if (
+          payload.status === "ready" &&
+          typeof adapter.getSyncSnapshot === "function"
+        ) {
+          try {
+            const snapshot = await adapter.getSyncSnapshot();
+            await chatService.syncWhatsappSnapshot({
+              userId: session.userId,
+              sessionId: session.id,
+              contacts: snapshot.contacts,
+              chats: snapshot.chats,
+            });
+
+            this.emit("workspace-sync", {
+              id: session.id,
+              userId: session.userId,
+              sessionId: session.id,
+            });
+          } catch (error) {
+            const lastError = `WhatsApp sync failed: ${error.message}`;
+            await sessionService.touchSessionState(session.id, {
+              lastError,
+            });
+
+            this.emit("session-status", {
+              id: session.id,
+              userId: session.userId,
+              sessionId: session.id,
+              status: payload.status,
+              transportType: payload.transportType || transportType,
+              lastError,
+              qrCode: nextQrCode,
+            });
+          }
+        }
+
+        if (payload.status === "disconnected" || payload.status === "error") {
+          this.adapters.delete(session.id);
+          if (!this.manualDisconnects.has(session.id)) {
+            this.scheduleReconnect(session.userId, session.id, payload.status);
+          }
+        }
+      }, "status"),
+    );
 
     adapter.on("message", (payload) => {
       this.emit("incoming-message", {
         userId: session.userId,
         sessionId: session.id,
-        ...payload
+        ...payload,
       });
     });
 
@@ -258,7 +284,7 @@ class SessionManager extends EventEmitter {
     await sessionService.touchSessionState(sessionId, {
       status: "disconnected",
       qrCode: null,
-      lastError: null
+      lastError: null,
     });
   }
 
@@ -288,7 +314,7 @@ class SessionManager extends EventEmitter {
       } catch (error) {
         await sessionService.touchSessionState(sessionId, {
           status: "error",
-          lastError: `Reconnect failed after ${reason}: ${error.message}`
+          lastError: `Reconnect failed after ${reason}: ${error.message}`,
         });
 
         this.emit("session-status", {
@@ -297,7 +323,7 @@ class SessionManager extends EventEmitter {
           sessionId,
           status: "error",
           lastError: `Reconnect failed after ${reason}: ${error.message}`,
-          qrCode: null
+          qrCode: null,
         });
 
         this.scheduleReconnect(userId, sessionId, reason);
@@ -318,7 +344,7 @@ class SessionManager extends EventEmitter {
   queueQrStatePersist(sessionId, data) {
     this.queuedQrStates.set(sessionId, {
       ...(this.queuedQrStates.get(sessionId) || {}),
-      ...data
+      ...data,
     });
 
     if (this.qrPersistTimers.has(sessionId)) {
@@ -334,9 +360,14 @@ class SessionManager extends EventEmitter {
         return;
       }
 
-      sessionService.touchSessionState(sessionId, pendingState).catch((error) => {
-        console.error(`Failed to persist queued QR state for session ${sessionId}.`, error);
-      });
+      sessionService
+        .touchSessionState(sessionId, pendingState)
+        .catch((error) => {
+          console.error(
+            `Failed to persist queued QR state for session ${sessionId}.`,
+            error,
+          );
+        });
     }, 400);
 
     this.qrPersistTimers.set(sessionId, timer);

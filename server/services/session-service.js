@@ -1,3 +1,31 @@
+const fs = require("fs");
+const path = require("path");
+const { sessionsDir } = require("../utils/paths");
+async function deleteSession(userId, sessionId) {
+  // Hapus dari database
+  await prisma.whatsappSession.delete({
+    where: { id: sessionId, userId },
+  });
+  // Hapus folder session di storage/sessions
+  const sessionFolder = path.join(sessionsDir, `session-${sessionId}`);
+  if (fs.existsSync(sessionFolder)) {
+    try {
+      fs.rmSync(sessionFolder, { recursive: true, force: true });
+    } catch (err) {
+      // Log error, tapi jangan gagalkan proses utama
+      console.warn(`Gagal hapus folder session: ${sessionFolder}`, err);
+    }
+  }
+
+  // Jika sudah tidak ada session lagi, hapus semua chat dan contact user
+  const remainingSessions = await prisma.whatsappSession.count({
+    where: { userId },
+  });
+  if (remainingSessions === 0) {
+    await prisma.chat.deleteMany({ where: { userId } });
+    await prisma.contact.deleteMany({ where: { userId } });
+  }
+}
 const { prisma } = require("../database/client");
 
 async function retryOnSqliteTimeout(operation) {
@@ -24,7 +52,7 @@ async function retryOnSqliteTimeout(operation) {
 async function listUserSessions(userId) {
   return prisma.whatsappSession.findMany({
     where: { userId },
-    orderBy: { createdAt: "desc" }
+    orderBy: { createdAt: "desc" },
   });
 }
 
@@ -39,8 +67,8 @@ async function createUserSession(userId, { name, phoneNumber }) {
       name: String(name).trim(),
       phoneNumber: phoneNumber ? String(phoneNumber).trim() : null,
       status: "disconnected",
-      transportType: "wwebjs"
-    }
+      transportType: "wwebjs",
+    },
   });
 }
 
@@ -48,8 +76,8 @@ async function getSessionById(userId, sessionId) {
   return prisma.whatsappSession.findFirst({
     where: {
       id: sessionId,
-      userId
-    }
+      userId,
+    },
   });
 }
 
@@ -57,9 +85,9 @@ async function listReconnectableSessions() {
   return prisma.whatsappSession.findMany({
     where: {
       status: {
-        in: ["ready", "connecting"]
-      }
-    }
+        in: ["ready", "connecting"],
+      },
+    },
   });
 }
 
@@ -67,8 +95,8 @@ async function touchSessionState(sessionId, data) {
   return retryOnSqliteTimeout(() =>
     prisma.whatsappSession.update({
       where: { id: sessionId },
-      data
-    })
+      data,
+    }),
   );
 }
 
@@ -77,5 +105,6 @@ module.exports = {
   getSessionById,
   listReconnectableSessions,
   listUserSessions,
-  touchSessionState
+  touchSessionState,
+  deleteSession,
 };

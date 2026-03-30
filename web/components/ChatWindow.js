@@ -1,10 +1,26 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { getApiBaseUrl } from "@/lib/api";
 import { MessageActionMenu } from "./MessageActionMenu";
 import { MediaPreviewModal } from "./MediaPreviewModal";
 import { EmojiPicker } from "./EmojiPicker";
 import { SendButtonSpinner, MessagesSkeletonList } from "./Skeletons";
-import { MdMoreVert, MdSend, MdEmojiEmotions, MdSearch, MdAdd, MdSettings, MdLogout, MdClose } from "react-icons/md";
+import {
+  MdMoreVert,
+  MdSend,
+  MdEmojiEmotions,
+  MdSearch,
+  MdAdd,
+  MdSettings,
+  MdLogout,
+  MdClose,
+} from "react-icons/md";
 
 function formatTime(value) {
   if (!value) {
@@ -13,7 +29,7 @@ function formatTime(value) {
 
   return new Intl.DateTimeFormat("id-ID", {
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
@@ -23,7 +39,11 @@ function renderStatus(message) {
     return "";
   }
 
-  return status === "read" ? "Read" : status === "delivered" ? "Delivered" : "Sent";
+  return status === "read"
+    ? "Read"
+    : status === "delivered"
+      ? "Delivered"
+      : "Sent";
 }
 
 function previewReply(message) {
@@ -50,10 +70,20 @@ function initials(value) {
 
 function ChatAvatar({ src, label }) {
   if (src) {
-    return <img src={src} alt={label} className="h-11 w-11 rounded-2xl object-cover" />;
+    return (
+      <img
+        src={src}
+        alt={label}
+        className="h-11 w-11 rounded-2xl object-cover"
+      />
+    );
   }
 
-  return <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#2e2f2f] text-sm font-semibold text-white">{initials(label)}</div>;
+  return (
+    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#2e2f2f] text-sm font-semibold text-white">
+      {initials(label)}
+    </div>
+  );
 }
 
 function renderMediaPreview(message) {
@@ -67,34 +97,64 @@ function renderMediaPreview(message) {
 
   if (isSticker) {
     return (
-      <a href={mediaUrl} target="_blank" rel="noreferrer" className="mb-2 inline-flex overflow-hidden rounded-2xl bg-transparent">
-        <img src={mediaUrl} alt={message.mediaFile.originalName} className="h-36 w-36 object-contain drop-shadow-sm" />
+      <a
+        href={mediaUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="mb-2 inline-flex overflow-hidden rounded-2xl bg-transparent"
+      >
+        <img
+          src={mediaUrl}
+          alt={message.mediaFile.originalName}
+          className="h-36 w-36 object-contain drop-shadow-sm"
+        />
       </a>
     );
   }
 
   if (mimeType.startsWith("image/")) {
     return (
-      <a href={mediaUrl} target="_blank" rel="noreferrer" className="mb-2 block overflow-hidden rounded-2xl">
-        <img src={mediaUrl} alt={message.mediaFile.originalName} className="max-h-[320px] w-full rounded-2xl object-cover" />
+      <a
+        href={mediaUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="mb-2 block overflow-hidden rounded-2xl"
+      >
+        <img
+          src={mediaUrl}
+          alt={message.mediaFile.originalName}
+          className="max-h-[320px] w-full rounded-2xl object-cover"
+        />
       </a>
     );
   }
 
   if (mimeType.startsWith("video/")) {
     return (
-      <video controls className="mb-2 max-h-[320px] w-full rounded-2xl bg-black">
+      <video
+        controls
+        className="mb-2 max-h-[320px] w-full rounded-2xl bg-black"
+      >
         <source src={mediaUrl} type={mimeType} />
       </video>
     );
   }
 
   if (mimeType.startsWith("audio/")) {
-    return <audio controls className="mb-2 w-full"><source src={mediaUrl} type={mimeType} /></audio>;
+    return (
+      <audio controls className="mb-2 w-full">
+        <source src={mediaUrl} type={mimeType} />
+      </audio>
+    );
   }
 
   return (
-    <a href={mediaUrl} target="_blank" rel="noreferrer" className="mb-2 inline-flex rounded-xl bg-white/10 px-3 py-2 text-sm font-medium text-white underline-offset-2 hover:underline">
+    <a
+      href={mediaUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="mb-2 inline-flex rounded-xl bg-white/10 px-3 py-2 text-sm font-medium text-white underline-offset-2 hover:underline"
+    >
       {message.mediaFile.originalName}
     </a>
   );
@@ -120,14 +180,15 @@ function groupConsecutiveImages(messages) {
         type: "image-group",
         messages: [message],
         direction: message.direction,
-        startTime: new Date(message.createdAt).getTime()
+        startTime: new Date(message.createdAt).getTime(),
       };
     } else if (
       isImage &&
       currentGroup &&
       currentGroup.type === "image-group" &&
       currentGroup.direction === message.direction &&
-      (new Date(message.createdAt).getTime() - currentGroup.startTime) <= TWO_MINUTES
+      new Date(message.createdAt).getTime() - currentGroup.startTime <=
+        TWO_MINUTES
     ) {
       // Add to current group
       currentGroup.messages.push(message);
@@ -153,7 +214,7 @@ function groupConsecutiveImages(messages) {
 }
 
 function renderGridImage(group, onImageClick) {
-  const images = group.messages.map(msg => msg.mediaFile).filter(Boolean);
+  const images = group.messages.map((msg) => msg.mediaFile).filter(Boolean);
   if (images.length === 0) return null;
 
   if (images.length === 1) {
@@ -164,13 +225,15 @@ function renderGridImage(group, onImageClick) {
         src={mediaUrl}
         alt={img.originalName}
         className="mb-2 h-24 w-24 cursor-pointer rounded-2xl object-cover"
-        onClick={() => onImageClick({ 
-          mediaUrl, 
-          relativePath: img.relativePath, 
-          mimeType: img.mimeType,
-          originalName: img.originalName,
-          isImage: true
-        })}
+        onClick={() =>
+          onImageClick({
+            mediaUrl,
+            relativePath: img.relativePath,
+            mimeType: img.mimeType,
+            originalName: img.originalName,
+            isImage: true,
+          })
+        }
       />
     );
   }
@@ -185,13 +248,15 @@ function renderGridImage(group, onImageClick) {
             src={mediaUrl}
             alt={img.originalName}
             className="h-32 w-32 cursor-pointer rounded-lg object-cover"
-            onClick={() => onImageClick({ 
-              mediaUrl, 
-              relativePath: img.relativePath, 
-              mimeType: img.mimeType,
-              originalName: img.originalName,
-              isImage: true
-            })}
+            onClick={() =>
+              onImageClick({
+                mediaUrl,
+                relativePath: img.relativePath,
+                mimeType: img.mimeType,
+                originalName: img.originalName,
+                isImage: true,
+              })
+            }
           />
         );
       })}
@@ -210,8 +275,17 @@ function renderMediaPreviewWithCallback(message, onImageClick) {
 
   if (isSticker) {
     return (
-      <a href={mediaUrl} target="_blank" rel="noreferrer" className="mb-2 inline-flex overflow-hidden rounded-2xl bg-transparent">
-        <img src={mediaUrl} alt={message.mediaFile.originalName} className="h-36 w-36 object-contain drop-shadow-sm" />
+      <a
+        href={mediaUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="mb-2 inline-flex overflow-hidden rounded-2xl bg-transparent"
+      >
+        <img
+          src={mediaUrl}
+          alt={message.mediaFile.originalName}
+          className="h-36 w-36 object-contain drop-shadow-sm"
+        />
       </a>
     );
   }
@@ -222,57 +296,75 @@ function renderMediaPreviewWithCallback(message, onImageClick) {
         src={mediaUrl}
         alt={message.mediaFile.originalName}
         className="mb-2 max-h-[320px] w-full cursor-pointer rounded-2xl object-cover"
-        onClick={() => onImageClick && onImageClick({ 
-          mediaUrl, 
-          relativePath: message.mediaFile.relativePath, 
-          mimeType: message.mediaFile.mimeType,
-          originalName: message.mediaFile.originalName,
-          isImage: true
-        })}
+        onClick={() =>
+          onImageClick &&
+          onImageClick({
+            mediaUrl,
+            relativePath: message.mediaFile.relativePath,
+            mimeType: message.mediaFile.mimeType,
+            originalName: message.mediaFile.originalName,
+            isImage: true,
+          })
+        }
       />
     );
   }
 
   if (mimeType.startsWith("video/")) {
     return (
-      <video controls className="mb-2 max-h-[320px] w-full rounded-2xl bg-black">
+      <video
+        controls
+        className="mb-2 max-h-[320px] w-full rounded-2xl bg-black"
+      >
         <source src={mediaUrl} type={mimeType} />
       </video>
     );
   }
 
   if (mimeType.startsWith("audio/")) {
-    return <audio controls className="mb-2 w-full"><source src={mediaUrl} type={mimeType} /></audio>;
+    return (
+      <audio controls className="mb-2 w-full">
+        <source src={mediaUrl} type={mimeType} />
+      </audio>
+    );
   }
 
   return (
-    <a href={mediaUrl} target="_blank" rel="noreferrer" className="mb-2 inline-flex rounded-xl bg-white/10 px-3 py-2 text-sm font-medium text-white underline-offset-2 hover:underline">
+    <a
+      href={mediaUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="mb-2 inline-flex rounded-xl bg-white/10 px-3 py-2 text-sm font-medium text-white underline-offset-2 hover:underline"
+    >
       {message.mediaFile.originalName}
     </a>
   );
 }
 
-export const ChatWindow = forwardRef(function ChatWindow({
-  chat,
-  messages,
-  chats,
-  typingState,
-  loading,
-  messagesLoading,
-  loadingOlder,
-  hasMoreMessages,
-  messageQuery,
-  onMessageQueryChange,
-  onLoadOlder,
-  onSendMessage,
-  onSendMedia,
-  onTyping,
-  onDeleteMessage,
-  onForwardMessage,
-  onOpenContacts,
-  onOpenSettings,
-  onLogout
-}, ref) {
+export const ChatWindow = forwardRef(function ChatWindow(
+  {
+    chat,
+    messages,
+    chats,
+    typingState,
+    loading,
+    messagesLoading,
+    loadingOlder,
+    hasMoreMessages,
+    messageQuery,
+    onMessageQueryChange,
+    onLoadOlder,
+    onSendMessage,
+    onSendMedia,
+    onTyping,
+    onDeleteMessage,
+    onForwardMessage,
+    onOpenContacts,
+    onOpenSettings,
+    onLogout,
+  },
+  ref,
+) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -297,14 +389,21 @@ export const ChatWindow = forwardRef(function ChatWindow({
   const emojiTriggerRef = useRef(null);
 
   const searchResults = useMemo(() => {
-    const query = String(messageQuery || "").trim().toLowerCase();
+    const query = String(messageQuery || "")
+      .trim()
+      .toLowerCase();
     if (!query) {
       return [];
     }
 
     return messages
       .map((message, index) => {
-        const matches = [message.body, message.sender, message.replyTo?.body, message.mediaFile?.originalName]
+        const matches = [
+          message.body,
+          message.sender,
+          message.replyTo?.body,
+          message.mediaFile?.originalName,
+        ]
           .filter(Boolean)
           .some((value) => value.toLowerCase().includes(query));
         return matches ? index : -1;
@@ -338,7 +437,10 @@ export const ChatWindow = forwardRef(function ChatWindow({
     setBusy(true);
 
     try {
-      await onSendMessage({ body: draft.trim(), replyToId: replyTo?.id || null });
+      await onSendMessage({
+        body: draft.trim(),
+        replyToId: replyTo?.id || null,
+      });
       setDraft("");
       setReplyTo(null);
       onTyping(false);
@@ -369,7 +471,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
         name: file.name,
         size: file.size,
         type: mimeType,
-        preview
+        preview,
       });
     }
 
@@ -430,7 +532,6 @@ export const ChatWindow = forwardRef(function ChatWindow({
     setEmojiPickerOpen(false);
   };
 
-
   const handleForward = async (messageId) => {
     if (!forwardTargetChatId) {
       return;
@@ -450,7 +551,8 @@ export const ChatWindow = forwardRef(function ChatWindow({
 
   const handleSearchPrev = () => {
     if (searchResults.length === 0) return;
-    const prevIndex = (searchResultIndex - 1 + searchResults.length) % searchResults.length;
+    const prevIndex =
+      (searchResultIndex - 1 + searchResults.length) % searchResults.length;
     setSearchResultIndex(prevIndex);
     scrollToSearchResult(prevIndex);
   };
@@ -458,9 +560,12 @@ export const ChatWindow = forwardRef(function ChatWindow({
   const scrollToSearchResult = (resultIndex) => {
     if (searchResults.length === 0) return;
     const messageIndex = searchResults[resultIndex];
-    const messageElement = document.querySelector(`[data-message-id="${messages[messageIndex]?.id}"]`);
+    const messageElement = document.querySelector(
+      `[data-message-id="${messages[messageIndex]?.id}"]`,
+    );
     if (messageElement && messagesViewportRef.current) {
-      messagesViewportRef.current.scrollTop = messageElement.offsetTop - messagesViewportRef.current.offsetTop;
+      messagesViewportRef.current.scrollTop =
+        messageElement.offsetTop - messagesViewportRef.current.offsetTop;
     }
   };
 
@@ -471,11 +576,15 @@ export const ChatWindow = forwardRef(function ChatWindow({
     }
   }, [messageQuery]);
 
-  useImperativeHandle(ref, () => ({
-    focusComposer() {
-      composerRef.current?.focus();
-    }
-  }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusComposer() {
+        composerRef.current?.focus();
+      },
+    }),
+    [],
+  );
 
   useEffect(() => {
     const textarea = composerRef.current;
@@ -509,7 +618,7 @@ export const ChatWindow = forwardRef(function ChatWindow({
       if (messagesViewportRef.current) {
         messagesViewportRef.current.scrollTo({
           top: messagesViewportRef.current.scrollHeight,
-          behavior
+          behavior,
         });
       }
     };
@@ -555,7 +664,11 @@ export const ChatWindow = forwardRef(function ChatWindow({
   }, [chat?.id, messages.length, messagesLoading]);
 
   if (loading) {
-    return <div className="flex flex-1 items-center justify-center text-white/50">Loading dashboard...</div>;
+    return (
+      <div className="flex flex-1 items-center justify-center text-white/50">
+        Loading dashboard...
+      </div>
+    );
   }
 
   if (!chat) {
@@ -563,8 +676,15 @@ export const ChatWindow = forwardRef(function ChatWindow({
       <div className="flex flex-1 items-center justify-center bg-[#161717] px-8 text-center text-white/50">
         <div>
           <p className="text-lg font-medium text-white">No chat selected</p>
-          <p className="mt-3 max-w-md text-sm leading-7 text-white/45">Start a new conversation from the contact selector to begin chatting.</p>
-          <button type="button" className="mt-5 rounded-full bg-brand-500 px-5 py-3 text-sm font-semibold text-[#10251a]" onClick={onOpenContacts}>
+          <p className="mt-3 max-w-md text-sm leading-7 text-white/45">
+            Start a new conversation from the contact selector to begin
+            chatting.
+          </p>
+          <button
+            type="button"
+            className="mt-5 rounded-full bg-brand-500 px-5 py-3 text-sm font-semibold text-[#10251a]"
+            onClick={onOpenContacts}
+          >
             New chat
           </button>
         </div>
@@ -576,10 +696,19 @@ export const ChatWindow = forwardRef(function ChatWindow({
     <section className="flex min-w-0 flex-1 flex-col bg-[#161717] text-white">
       <header className="flex h-[78px] shrink-0 items-center justify-between gap-4 bg-[#161717] px-6 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <ChatAvatar src={chat.contact.avatarUrl} label={chat.contact.displayName} />
+          <ChatAvatar
+            src={chat.contact.avatarUrl}
+            label={chat.contact.displayName}
+          />
           <div className="min-w-0">
-            <h2 className="truncate font-semibold text-white">{chat.contact.displayName}</h2>
-            <p className="text-sm text-white/40">{typingState?.isTyping ? `${typingState.name} is typing...` : "WhatsApp chat synced locally"}</p>
+            <h2 className="truncate font-semibold text-white">
+              {chat.contact.displayName}
+            </h2>
+            <p className="text-sm text-white/40">
+              {typingState?.isTyping
+                ? `${typingState.name} is typing...`
+                : "WhatsApp chat synced locally"}
+            </p>
           </div>
         </div>
 
@@ -634,14 +763,49 @@ export const ChatWindow = forwardRef(function ChatWindow({
               </button>
             </div>
           ) : null}
-          <button type="button" title="Search" aria-label="Search" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={() => setSearchOpen(true)}><MdSearch className="w-5 h-5" /></button>
-          <button type="button" title="New chat" aria-label="New chat" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-lg leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onOpenContacts}><MdAdd className="w-5 h-5" /></button>
-          <button type="button" title="Settings" aria-label="Settings" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onOpenSettings}><MdSettings className="w-5 h-5" /></button>
-          <button type="button" title="Logout" aria-label="Logout" className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]" onClick={onLogout}><MdLogout className="w-5 h-5" /></button>
+          <button
+            type="button"
+            title="Search"
+            aria-label="Search"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]"
+            onClick={() => setSearchOpen(true)}
+          >
+            <MdSearch className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            title="New chat"
+            aria-label="New chat"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-lg leading-none text-white transition hover:bg-[#3a3b3b]"
+            onClick={onOpenContacts}
+          >
+            <MdAdd className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            title="Settings"
+            aria-label="Settings"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]"
+            onClick={onOpenSettings}
+          >
+            <MdSettings className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            title="Logout"
+            aria-label="Logout"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-[#2e2f2f] text-base leading-none text-white transition hover:bg-[#3a3b3b]"
+            onClick={onLogout}
+          >
+            <MdLogout className="w-5 h-5" />
+          </button>
         </div>
       </header>
 
-      <div ref={messagesViewportRef} className="flex-1 overflow-y-auto bg-[#161717] px-8 py-5">
+      <div
+        ref={messagesViewportRef}
+        className="flex-1 overflow-y-auto bg-[#161717] px-8 py-5"
+      >
         <div className="mb-5 flex justify-center">
           <button
             type="button"
@@ -649,13 +813,15 @@ export const ChatWindow = forwardRef(function ChatWindow({
             onClick={onLoadOlder}
             disabled={!hasMoreMessages || loadingOlder}
           >
-            {loadingOlder ? "Loading..." : hasMoreMessages ? "Load older messages" : "All messages loaded"}
+            {loadingOlder
+              ? "Loading..."
+              : hasMoreMessages
+                ? "Load older messages"
+                : "All messages loaded"}
           </button>
         </div>
 
-        {messagesLoading ? (
-          <MessagesSkeletonList />
-        ) : null}
+        {messagesLoading ? <MessagesSkeletonList /> : null}
 
         <div className="space-y-3">
           {(() => {
@@ -667,22 +833,33 @@ export const ChatWindow = forwardRef(function ChatWindow({
                 const outbound = firstMessage.direction === "outbound";
                 // Merge captions from all images in the group
                 const captions = group.messages
-                  .map(msg => msg.body)
+                  .map((msg) => msg.body)
                   .filter(Boolean)
                   .join("\n");
-                
+
                 return (
-                  <div key={`group-${groupIndex}`} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
-                    <div 
+                  <div
+                    key={`group-${groupIndex}`}
+                    className={`flex ${outbound ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
                       className={`max-w-[72%] rounded-[18px] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-colors relative ${
                         outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]"
                       }`}
                     >
-                      {renderGridImage(group, (media) => setSelectedMediaModal(media))}
-                      {captions ? <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/88">{captions}</p> : null}
+                      {renderGridImage(group, (media) =>
+                        setSelectedMediaModal(media),
+                      )}
+                      {captions ? (
+                        <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-white/88">
+                          {captions}
+                        </p>
+                      ) : null}
                       <div className="mt-3 flex items-center justify-end gap-2 text-[11px] text-white/35">
                         <span>{formatTime(firstMessage.createdAt)}</span>
-                        {outbound ? <span>{renderStatus(firstMessage)}</span> : null}
+                        {outbound ? (
+                          <span>{renderStatus(firstMessage)}</span>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -692,31 +869,56 @@ export const ChatWindow = forwardRef(function ChatWindow({
                 const message = group.message;
                 const outbound = message.direction === "outbound";
                 const messageIndexInAll = messages.indexOf(message);
-                const isSearchResult = messageQuery && searchResults.includes(messageIndexInAll);
-                const isCurrentSearchResult = isSearchResult && searchResults[searchResultIndex] === messageIndexInAll;
+                const isSearchResult =
+                  messageQuery && searchResults.includes(messageIndexInAll);
+                const isCurrentSearchResult =
+                  isSearchResult &&
+                  searchResults[searchResultIndex] === messageIndexInAll;
 
                 return (
-                  <div key={message.id} data-message-id={message.id} className={`flex ${outbound ? "justify-end" : "justify-start"}`}>
-                    <div 
+                  <div
+                    key={message.id}
+                    data-message-id={message.id}
+                    className={`flex ${outbound ? "justify-end" : "justify-start"}`}
+                  >
+                    <div
                       className={`max-w-[72%] rounded-[18px] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-colors relative ${
-                        isCurrentSearchResult 
-                          ? "ring-2 ring-brand-500 " + (outbound ? "bg-[#1a5f41]" : "bg-[#3a4a4a]")
-                          : isSearchResult 
-                          ? "ring-1 ring-brand-500/50 " + (outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]")
-                          : outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]"
+                        isCurrentSearchResult
+                          ? "ring-2 ring-brand-500 " +
+                            (outbound ? "bg-[#1a5f41]" : "bg-[#3a4a4a]")
+                          : isSearchResult
+                            ? "ring-1 ring-brand-500/50 " +
+                              (outbound ? "bg-[#144d37]" : "bg-[#2e2f2f]")
+                            : outbound
+                              ? "bg-[#144d37]"
+                              : "bg-[#2e2f2f]"
                       }`}
                       onMouseEnter={() => setHoveredMessageId(message.id)}
                       onMouseLeave={() => setHoveredMessageId(null)}
                     >
                       {message.replyTo ? (
                         <div className="mb-2 rounded-2xl border-l-4 border-brand-500 bg-white/[0.04] px-3 py-2 text-xs text-white/55">
-                          <span className="font-semibold text-white">{message.replyTo.direction === "outbound" ? "Anda" : chat.contact.displayName}</span>
-                          <p className="mt-1 truncate">{previewReply(message.replyTo)}</p>
+                          <span className="font-semibold text-white">
+                            {message.replyTo.direction === "outbound"
+                              ? "Anda"
+                              : chat.contact.displayName}
+                          </span>
+                          <p className="mt-1 truncate">
+                            {previewReply(message.replyTo)}
+                          </p>
                         </div>
                       ) : null}
 
-                      {renderMediaPreviewWithCallback(message, (media) => setSelectedMediaModal(media))}
-                      {message.body ? <p className="whitespace-pre-wrap text-sm leading-6 text-white/88">{message.body}</p> : null}
+                      {/* Always render media preview if mediaFile exists */}
+                      {message.mediaFile &&
+                        renderMediaPreviewWithCallback(message, (media) =>
+                          setSelectedMediaModal(media),
+                        )}
+                      {message.body ? (
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-white/88">
+                          {message.body}
+                        </p>
+                      ) : null}
 
                       <div className="mt-3 flex items-center justify-end gap-3 text-[11px] text-white/35">
                         <span>{formatTime(message.createdAt)}</span>
@@ -729,7 +931,11 @@ export const ChatWindow = forwardRef(function ChatWindow({
                             type="button"
                             ref={menuTriggerRef}
                             className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2e2f2f] text-white/60 transition hover:bg-[#3a3b3b] hover:text-white"
-                            onClick={() => setActiveMenuMessageId((current) => (current === message.id ? null : message.id))}
+                            onClick={() =>
+                              setActiveMenuMessageId((current) =>
+                                current === message.id ? null : message.id,
+                              )
+                            }
                             title="More options"
                           >
                             <MdMoreVert className="w-5 h-5" />
@@ -741,7 +947,9 @@ export const ChatWindow = forwardRef(function ChatWindow({
                             onReply={() => setReplyTo(message)}
                             onDelete={() => onDeleteMessage(message.id)}
                             onForward={() => {
-                              setForwardingMessageId((current) => (current === message.id ? null : message.id));
+                              setForwardingMessageId((current) =>
+                                current === message.id ? null : message.id,
+                              );
                               setForwardTargetChatId("");
                             }}
                             isOutbound={outbound}
@@ -755,7 +963,9 @@ export const ChatWindow = forwardRef(function ChatWindow({
                           <select
                             className="min-w-[200px] flex-1 rounded-xl border border-white/10 bg-[#0b141a] px-3 py-2 text-sm text-white outline-none"
                             value={forwardTargetChatId}
-                            onChange={(event) => setForwardTargetChatId(event.target.value)}
+                            onChange={(event) =>
+                              setForwardTargetChatId(event.target.value)
+                            }
                           >
                             <option value="">Select target chat</option>
                             {forwardTargets.map((target) => (
@@ -764,7 +974,13 @@ export const ChatWindow = forwardRef(function ChatWindow({
                               </option>
                             ))}
                           </select>
-                          <button type="button" className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]" onClick={() => handleForward(message.id)}>Send</button>
+                          <button
+                            type="button"
+                            className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]"
+                            onClick={() => handleForward(message.id)}
+                          >
+                            Send
+                          </button>
                         </div>
                       ) : null}
                     </div>
@@ -781,10 +997,20 @@ export const ChatWindow = forwardRef(function ChatWindow({
         {replyTo ? (
           <div className="mb-3 flex items-start justify-between rounded-2xl bg-[#2e2f2f] px-4 py-3">
             <div className="min-w-0">
-              <p className="text-xs uppercase tracking-[0.22em] text-brand-100">Reply</p>
-              <p className="mt-1 truncate text-sm text-white/55">{previewReply(replyTo)}</p>
+              <p className="text-xs uppercase tracking-[0.22em] text-brand-100">
+                Reply
+              </p>
+              <p className="mt-1 truncate text-sm text-white/55">
+                {previewReply(replyTo)}
+              </p>
             </div>
-            <button type="button" className="text-sm text-white/45 hover:text-white" onClick={() => setReplyTo(null)}><MdClose className="w-4 h-4" /></button>
+            <button
+              type="button"
+              className="text-sm text-white/45 hover:text-white"
+              onClick={() => setReplyTo(null)}
+            >
+              <MdClose className="w-4 h-4" />
+            </button>
           </div>
         ) : null}
 
@@ -793,9 +1019,16 @@ export const ChatWindow = forwardRef(function ChatWindow({
             {pendingFiles.map((file, index) => (
               <div key={index} className="relative">
                 {file.preview && file.type.startsWith("image/") ? (
-                  <img src={file.preview} alt={file.name} className="h-16 w-16 rounded-lg object-cover" />
+                  <img
+                    src={file.preview}
+                    alt={file.name}
+                    className="h-16 w-16 rounded-lg object-cover"
+                  />
                 ) : file.preview && file.type.startsWith("video/") ? (
-                  <video src={file.preview} className="h-16 w-16 rounded-lg object-cover" />
+                  <video
+                    src={file.preview}
+                    className="h-16 w-16 rounded-lg object-cover"
+                  />
                 ) : (
                   <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-[#2e2f2f] text-sm font-medium text-white/60">
                     {file.name.split(".").pop()?.toUpperCase() || "FILE"}
@@ -816,7 +1049,14 @@ export const ChatWindow = forwardRef(function ChatWindow({
         <div className="flex items-center gap-2 relative">
           <label className="flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-[#2e2f2f] text-[24px] leading-none text-white/60 transition hover:bg-[#3a3b3b] hover:text-white">
             <MdAdd className="w-5 h-5" />
-            <input ref={fileInputRef} type="file" className="hidden" onChange={handleFile} multiple accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt" />
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFile}
+              multiple
+              accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.txt"
+            />
           </label>
           <button
             type="button"
@@ -859,8 +1099,16 @@ export const ChatWindow = forwardRef(function ChatWindow({
               disabled={busy || uploading}
             />
           </div>
-          <button type="submit" className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-500 text-sm font-semibold leading-none text-[#10251a] transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60" disabled={busy || uploading}>
-            {busy || uploading ? <SendButtonSpinner /> : <MdSend className="w-5 h-5" />}
+          <button
+            type="submit"
+            className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-500 text-sm font-semibold leading-none text-[#10251a] transition hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={busy || uploading}
+          >
+            {busy || uploading ? (
+              <SendButtonSpinner />
+            ) : (
+              <MdSend className="w-5 h-5" />
+            )}
           </button>
         </div>
       </form>

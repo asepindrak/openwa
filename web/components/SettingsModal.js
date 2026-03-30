@@ -6,11 +6,13 @@ function SessionStatusBadge({ status }) {
     ready: "bg-brand-500/15 text-brand-100 ring-1 ring-brand-400/20",
     connecting: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-400/20",
     disconnected: "bg-white/8 text-white/60 ring-1 ring-white/10",
-    error: "bg-red-500/15 text-red-100 ring-1 ring-red-400/20"
+    error: "bg-red-500/15 text-red-100 ring-1 ring-red-400/20",
   };
 
   return (
-    <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium capitalize tracking-[0.08em] ${colors[status] || colors.disconnected}`}>
+    <span
+      className={`rounded-full px-2.5 py-1 text-[11px] font-medium capitalize tracking-[0.08em] ${colors[status] || colors.disconnected}`}
+    >
       {status}
     </span>
   );
@@ -26,7 +28,11 @@ function initials(label) {
 }
 
 function SessionAvatar({ label }) {
-  return <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#2e2f2f] text-sm font-semibold text-white">{initials(label)}</div>;
+  return (
+    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#2e2f2f] text-sm font-semibold text-white">
+      {initials(label)}
+    </div>
+  );
 }
 
 function formatDateTime(value) {
@@ -39,7 +45,7 @@ function formatDateTime(value) {
     month: "short",
     year: "numeric",
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
   }).format(new Date(value));
 }
 
@@ -51,6 +57,10 @@ export function SettingsModal({
   onSelect,
   onConnect,
   onDisconnect,
+  onClearSession,
+  onDeleteSession,
+  connectLoading,
+  qrLoading,
   sessionName,
   sessionPhone,
   onSessionNameChange,
@@ -62,7 +72,7 @@ export function SettingsModal({
   apiKeySecret,
   onApiKeyNameChange,
   onCreateApiKey,
-  onRevokeApiKey
+  onRevokeApiKey,
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -76,14 +86,26 @@ export function SettingsModal({
         <div className="flex items-center justify-between px-6 py-5">
           <div className="flex items-center gap-4">
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white p-2 shadow-[0_16px_40px_rgba(0,0,0,0.18)]">
-              <BrandLogo variant="square" alt="OpenWA" className="h-full w-full rounded-xl" />
+              <BrandLogo
+                variant="square"
+                alt="OpenWA"
+                className="h-full w-full rounded-xl"
+              />
             </div>
             <div>
-              <p className="text-[11px] uppercase tracking-[0.26em] text-white/35">Settings</p>
-              <h2 className="mt-2 text-xl font-semibold text-white">OpenWA Devices</h2>
+              <p className="text-[11px] uppercase tracking-[0.26em] text-white/35">
+                Settings
+              </p>
+              <h2 className="mt-2 text-xl font-semibold text-white">
+                OpenWA Devices
+              </h2>
             </div>
           </div>
-          <button type="button" className="rounded-full bg-[#2e2f2f] px-4 py-2 text-sm text-white/70 transition hover:bg-[#3a3b3b] hover:text-white" onClick={onClose}>
+          <button
+            type="button"
+            className="rounded-full bg-[#2e2f2f] px-4 py-2 text-sm text-white/70 transition hover:bg-[#3a3b3b] hover:text-white"
+            onClick={onClose}
+          >
             Close
           </button>
         </div>
@@ -107,37 +129,79 @@ export function SettingsModal({
                       <SessionAvatar label={session.name} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center justify-between gap-3">
-                          <h3 className="truncate font-medium text-white">{session.name}</h3>
+                          <h3 className="truncate font-medium text-white">
+                            {session.name}
+                          </h3>
                           <SessionStatusBadge status={session.status} />
                         </div>
-                        <p className="mt-1 text-sm text-white/45">{session.phoneNumber || "Waiting for WhatsApp pairing"}</p>
-                        <p className="mt-2 text-xs uppercase tracking-[0.16em] text-white/30">
-                          Transport: {session.transportType === "mock" ? "Mock" : "WhatsApp Web"}
+                        <p className="mt-1 text-sm text-white/45">
+                          {session.phoneNumber ||
+                            "Waiting for WhatsApp pairing"}
                         </p>
-                        {session.lastError ? <p className="mt-3 rounded-2xl bg-red-500/10 px-3 py-2 text-sm text-red-100">{session.lastError}</p> : null}
+                        <p className="mt-2 text-xs uppercase tracking-[0.16em] text-white/30">
+                          Transport:{" "}
+                          {session.transportType === "mock"
+                            ? "Mock"
+                            : "WhatsApp Web"}
+                        </p>
+                        {session.lastError ? (
+                          <p className="mt-3 rounded-2xl bg-red-500/10 px-3 py-2 text-sm text-red-100">
+                            {session.lastError}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
 
-                    <div className="mt-4 flex gap-2">
+                    <div className="mt-4 flex gap-2 flex-wrap">
                       <button
                         type="button"
-                        className="rounded-2xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]"
+                        className="rounded-2xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a] disabled:opacity-60"
+                        disabled={
+                          !!connectLoading && connectLoading === session.id
+                        }
                         onClick={(event) => {
                           event.stopPropagation();
                           onConnect(session.id);
                         }}
                       >
-                        Connect
+                        {connectLoading === session.id
+                          ? "Connecting..."
+                          : "Connect"}
                       </button>
                       <button
                         type="button"
-                        className="rounded-2xl bg-[#2e2f2f] px-4 py-2 text-sm text-white/75"
+                        className="rounded-2xl bg-[#2e2f2f] px-4 py-2 text-sm text-white/75 disabled:opacity-60"
+                        disabled={
+                          !!connectLoading && connectLoading === session.id
+                        }
                         onClick={(event) => {
                           event.stopPropagation();
                           onDisconnect(session.id);
                         }}
                       >
-                        Disconnect
+                        {connectLoading === session.id
+                          ? "Disconnecting..."
+                          : "Disconnect"}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-2xl bg-yellow-700 px-4 py-2 text-sm text-white/90"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onClearSession(session.id);
+                        }}
+                      >
+                        Clear Session
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-2xl bg-red-700 px-4 py-2 text-sm text-white/90"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onDeleteSession(session.id);
+                        }}
+                      >
+                        Delete Device
                       </button>
                     </div>
                   </button>
@@ -148,25 +212,41 @@ export function SettingsModal({
 
           <div className="min-h-0 overflow-y-auto px-6 py-5">
             <div className="rounded-[28px] bg-[#161717] p-4">
-              <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">Pairing QR</p>
-              {sessions.find((session) => session.id === activeSessionId)?.qrCode ? (
+              <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+                Pairing QR
+              </p>
+              {qrLoading ? (
+                <div className="mt-4 rounded-[24px] bg-[#2e2f2f] px-4 py-16 text-center text-sm leading-6 text-white/40">
+                  Loading QR code...
+                </div>
+              ) : sessions.find((session) => session.id === activeSessionId)
+                  ?.qrCode ? (
                 <div className="mt-4 rounded-[24px] bg-white p-4">
                   <img
-                    src={sessions.find((session) => session.id === activeSessionId)?.qrCode}
+                    src={
+                      sessions.find((session) => session.id === activeSessionId)
+                        ?.qrCode
+                    }
                     alt="QR Code"
                     className="mx-auto h-56 w-56 rounded-2xl"
                   />
                 </div>
               ) : (
                 <div className="mt-4 rounded-[24px] bg-[#2e2f2f] px-4 py-16 text-center text-sm leading-6 text-white/40">
-                  QR code for pairing will appear here when session is connecting.
+                  QR code for pairing will appear here when session is
+                  connecting.
                 </div>
               )}
             </div>
 
-            <form className="mt-5 space-y-3 rounded-[28px] bg-[#161717] p-4" onSubmit={onCreateSession}>
+            <form
+              className="mt-5 space-y-3 rounded-[28px] bg-[#161717] p-4"
+              onSubmit={onCreateSession}
+            >
               <div>
-                <p className="mb-2 text-[11px] uppercase tracking-[0.24em] text-white/35">Add device</p>
+                <p className="mb-2 text-[11px] uppercase tracking-[0.24em] text-white/35">
+                  Add device
+                </p>
                 <input
                   className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
                   placeholder="Session name, e.g. Sales Team"
@@ -181,7 +261,10 @@ export function SettingsModal({
                 value={sessionPhone}
                 onChange={(event) => onSessionPhoneChange(event.target.value)}
               />
-              <button type="submit" className="w-full rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]">
+              <button
+                type="submit"
+                className="w-full rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+              >
                 Add WhatsApp Session
               </button>
             </form>
@@ -189,16 +272,27 @@ export function SettingsModal({
             <div className="mt-5 rounded-[28px] bg-[#161717] p-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">API Access</p>
-                  <h3 className="mt-2 text-base font-semibold text-white">Generate API key</h3>
-                  <p className="mt-2 text-sm leading-6 text-white/45">Use with external agents via `X-API-Key` header or `Authorization: Bearer &lt;api-key&gt;`.</p>
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+                    API Access
+                  </p>
+                  <h3 className="mt-2 text-base font-semibold text-white">
+                    Generate API key
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-white/45">
+                    Use with external agents via `X-API-Key` header or
+                    `Authorization: Bearer &lt;api-key&gt;`.
+                  </p>
                 </div>
               </div>
 
               {apiKeySecret ? (
                 <div className="mt-4 rounded-[22px] bg-[#2e2f2f] p-4">
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-brand-200/80">Shown once</p>
-                  <p className="mt-2 break-all font-mono text-sm text-white">{apiKeySecret}</p>
+                  <p className="text-[11px] uppercase tracking-[0.22em] text-brand-200/80">
+                    Shown once
+                  </p>
+                  <p className="mt-2 break-all font-mono text-sm text-white">
+                    {apiKeySecret}
+                  </p>
                   <button
                     type="button"
                     className="mt-3 rounded-full bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]"
@@ -221,26 +315,41 @@ export function SettingsModal({
                   onChange={(event) => onApiKeyNameChange(event.target.value)}
                   required
                 />
-                <button type="submit" className="shrink-0 rounded-[22px] bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]">
+                <button
+                  type="submit"
+                  className="shrink-0 rounded-[22px] bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+                >
                   Generate
                 </button>
               </form>
 
               <div className="mt-4 max-h-[260px] space-y-3 overflow-y-auto pr-1">
-                {apiKeysLoading ? <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm text-white/45">Loading API keys...</div> : null}
+                {apiKeysLoading ? (
+                  <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm text-white/45">
+                    Loading API keys...
+                  </div>
+                ) : null}
 
                 {!apiKeysLoading && !apiKeys.length ? (
                   <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm leading-6 text-white/45">
-                    No API keys yet. Create one for OpenAPI client, AI agents, or external integrations.
+                    No API keys yet. Create one for OpenAPI client, AI agents,
+                    or external integrations.
                   </div>
                 ) : null}
 
                 {apiKeys.map((apiKey) => (
-                  <div key={apiKey.id} className="rounded-[22px] bg-[#2e2f2f] px-4 py-4">
+                  <div
+                    key={apiKey.id}
+                    className="rounded-[22px] bg-[#2e2f2f] px-4 py-4"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <h4 className="truncate text-sm font-semibold text-white">{apiKey.name}</h4>
-                        <p className="mt-1 font-mono text-xs text-white/55">{apiKey.maskedKey}</p>
+                        <h4 className="truncate text-sm font-semibold text-white">
+                          {apiKey.name}
+                        </h4>
+                        <p className="mt-1 font-mono text-xs text-white/55">
+                          {apiKey.maskedKey}
+                        </p>
                       </div>
                       <button
                         type="button"

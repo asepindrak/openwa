@@ -10,6 +10,8 @@ import { createSocket } from "@/lib/socket";
 import { useAppStore } from "@/store/useAppStore";
 
 export default function DashboardPage() {
+  const [connectLoading, setConnectLoading] = useState(null);
+  const [qrLoading, setQrLoading] = useState(false);
   const router = useRouter();
   const {
     token,
@@ -34,7 +36,7 @@ export default function DashboardPage() {
     setActiveSession,
     messagesByChat,
     messageMetaByChat,
-    typingByChat
+    typingByChat,
   } = useAppStore();
 
   const [loading, setLoading] = useState(true);
@@ -57,11 +59,19 @@ export default function DashboardPage() {
   const [contactsPanelOpen, setContactsPanelOpen] = useState(false);
   const chatWindowRef = useRef(null);
 
-  const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId) || null, [activeChatId, chats]);
+  const activeChat = useMemo(
+    () => chats.find((chat) => chat.id === activeChatId) || null,
+    [activeChatId, chats],
+  );
   const activeMessages = messagesByChat[activeChatId] || [];
-  const activeMeta = messageMetaByChat[activeChatId] || { hasMore: false, nextBefore: null };
+  const activeMeta = messageMetaByChat[activeChatId] || {
+    hasMore: false,
+    nextBefore: null,
+  };
   const activeTyping = typingByChat[activeChatId];
-  const readySessions = sessions.filter((session) => session.status === "ready").length;
+  const readySessions = sessions.filter(
+    (session) => session.status === "ready",
+  ).length;
 
   const loadContacts = useCallback(async () => {
     if (!token) {
@@ -95,30 +105,33 @@ export default function DashboardPage() {
     }
   }, [token]);
 
-  const loadWorkspace = useCallback(async (showSpinner = false) => {
-    if (!token) {
-      return;
-    }
-
-    if (showSpinner) {
-      setLoading(true);
-    }
-
-    try {
-      const data = await apiFetch("/api/bootstrap", { token });
-      setBootstrapData(data);
-    } catch (requestError) {
-      setError(requestError.message);
-      if (requestError.status === 401) {
-        logout();
-        router.replace("/");
+  const loadWorkspace = useCallback(
+    async (showSpinner = false) => {
+      if (!token) {
+        return;
       }
-    } finally {
+
       if (showSpinner) {
-        setLoading(false);
+        setLoading(true);
       }
-    }
-  }, [logout, router, setBootstrapData, token]);
+
+      try {
+        const data = await apiFetch("/api/bootstrap", { token });
+        setBootstrapData(data);
+      } catch (requestError) {
+        setError(requestError.message);
+        if (requestError.status === 401) {
+          logout();
+          router.replace("/");
+        }
+      } finally {
+        if (showSpinner) {
+          setLoading(false);
+        }
+      }
+    },
+    [logout, router, setBootstrapData, token],
+  );
 
   useEffect(() => {
     hydrateAuth();
@@ -130,9 +143,11 @@ export default function DashboardPage() {
       return;
     }
 
-    Promise.all([loadWorkspace(true), loadContacts(), loadApiKeys()]).finally(() => {
-      setLoading(false);
-    });
+    Promise.all([loadWorkspace(true), loadContacts(), loadApiKeys()]).finally(
+      () => {
+        setLoading(false);
+      },
+    );
   }, [loadApiKeys, loadContacts, loadWorkspace, router, token]);
 
   useEffect(() => {
@@ -164,6 +179,10 @@ export default function DashboardPage() {
 
     socketClient.on("session_status_update", (session) => {
       upsertSession(session);
+      if (session.status === "ready") {
+        loadWorkspace();
+        loadContacts();
+      }
     });
 
     socketClient.on("workspace_synced", () => {
@@ -179,7 +198,16 @@ export default function DashboardPage() {
       socketClient.close();
       setSocket(null);
     };
-  }, [addMessage, loadContacts, loadWorkspace, setSocket, token, updateMessageStatus, upsertChat, upsertSession]);
+  }, [
+    addMessage,
+    loadContacts,
+    loadWorkspace,
+    setSocket,
+    token,
+    updateMessageStatus,
+    upsertChat,
+    upsertSession,
+  ]);
 
   useEffect(() => {
     if (!activeChatId) {
@@ -201,7 +229,7 @@ export default function DashboardPage() {
       .then((data) => {
         setMessages(activeChatId, data.messages, {
           hasMore: Boolean(data.hasMore),
-          nextBefore: data.nextBefore || null
+          nextBefore: data.nextBefore || null,
         });
       })
       .catch((requestError) => {
@@ -222,8 +250,8 @@ export default function DashboardPage() {
         token,
         body: {
           name: sessionName,
-          phoneNumber: sessionPhone
-        }
+          phoneNumber: sessionPhone,
+        },
       });
 
       upsertSession(data.session);
@@ -239,30 +267,71 @@ export default function DashboardPage() {
 
   const handleConnectSession = async (sessionId) => {
     setError("");
+    setConnectLoading(sessionId);
+    setQrLoading(true);
     try {
       const data = await apiFetch(`/api/sessions/${sessionId}/connect`, {
         method: "POST",
-        token
+        token,
       });
-
       upsertSession(data.session);
       setActiveSession(sessionId);
     } catch (requestError) {
       setError(requestError.message);
+    } finally {
+      setConnectLoading(null);
+      setTimeout(() => setQrLoading(false), 1200); // beri waktu QR muncul
+    }
+  };
+
+  const handleClearSession = async (sessionId) => {
+    setError("");
+    setConnectLoading(sessionId);
+    try {
+      await apiFetch(`/api/sessions/${sessionId}/disconnect`, {
+        method: "POST",
+        token,
+      });
+      await loadWorkspace(true);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setConnectLoading(null);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId) => {
+    setError("");
+    setConnectLoading(sessionId);
+    try {
+      await apiFetch(`/api/sessions/${sessionId}`, {
+        method: "DELETE",
+        token,
+      });
+      await loadWorkspace(true);
+      if (activeSessionId === sessionId) {
+        setActiveSession(null);
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setConnectLoading(null);
     }
   };
 
   const handleDisconnectSession = async (sessionId) => {
     setError("");
+    setConnectLoading(sessionId);
     try {
       const data = await apiFetch(`/api/sessions/${sessionId}/disconnect`, {
         method: "POST",
-        token
+        token,
       });
-
       upsertSession(data.session);
     } catch (requestError) {
       setError(requestError.message);
+    } finally {
+      setConnectLoading(null);
     }
   };
 
@@ -275,8 +344,8 @@ export default function DashboardPage() {
         method: "POST",
         token,
         body: {
-          name: apiKeyName
-        }
+          name: apiKeyName,
+        },
       });
 
       setApiKeySecret(result.secret);
@@ -294,7 +363,7 @@ export default function DashboardPage() {
     try {
       await apiFetch(`/api/api-keys/${apiKeyId}`, {
         method: "DELETE",
-        token
+        token,
       });
 
       setApiKeys((current) => current.filter((item) => item.id !== apiKeyId));
@@ -316,12 +385,18 @@ export default function DashboardPage() {
     try {
       const result = await apiFetch(`/api/contacts/${contactId}/open`, {
         method: "POST",
-        token
+        token,
       });
 
       upsertChat(result.chat);
       await handleOpenChat(result.chat.id);
-      setContacts((current) => current.map((item) => (item.id === contactId ? { ...item, hasChat: true, chatId: result.chat.id } : item)));
+      setContacts((current) =>
+        current.map((item) =>
+          item.id === contactId
+            ? { ...item, hasChat: true, chatId: result.chat.id }
+            : item,
+        ),
+      );
       setContactsPanelOpen(false);
       setTimeout(() => {
         chatWindowRef.current?.focusComposer();
@@ -345,7 +420,7 @@ export default function DashboardPage() {
           chatId: activeChatId,
           body,
           type: "text",
-          replyToId
+          replyToId,
         },
         (response) => {
           if (response?.ok) {
@@ -354,7 +429,7 @@ export default function DashboardPage() {
           }
 
           reject(new Error(response?.error || "Failed to send message."));
-        }
+        },
       );
     });
   };
@@ -370,7 +445,7 @@ export default function DashboardPage() {
     const upload = await apiFetch("/api/media", {
       method: "POST",
       token,
-      formData
+      formData,
     });
 
     await new Promise((resolve, reject) => {
@@ -380,7 +455,7 @@ export default function DashboardPage() {
           chatId: activeChatId,
           mediaFileId: upload.mediaFile.id,
           body: caption,
-          type: upload.type
+          type: upload.type,
         },
         (response) => {
           if (response?.ok) {
@@ -389,7 +464,7 @@ export default function DashboardPage() {
           }
 
           reject(new Error(response?.error || "Failed to send media."));
-        }
+        },
       );
     });
   };
@@ -397,7 +472,7 @@ export default function DashboardPage() {
   const handleTyping = (isTyping) => {
     socket?.emit("typing", {
       chatId: activeChatId,
-      isTyping
+      isTyping,
     });
   };
 
@@ -408,10 +483,13 @@ export default function DashboardPage() {
 
     setLoadingOlder(true);
     try {
-      const data = await apiFetch(`/api/chats/${activeChatId}/messages?before=${encodeURIComponent(activeMeta.nextBefore)}&take=30`, { token });
+      const data = await apiFetch(
+        `/api/chats/${activeChatId}/messages?before=${encodeURIComponent(activeMeta.nextBefore)}&take=30`,
+        { token },
+      );
       prependMessages(activeChatId, data.messages, {
         hasMore: Boolean(data.hasMore),
-        nextBefore: data.nextBefore || null
+        nextBefore: data.nextBefore || null,
       });
     } catch (requestError) {
       setError(requestError.message);
@@ -424,7 +502,7 @@ export default function DashboardPage() {
     try {
       const result = await apiFetch(`/api/messages/${messageId}`, {
         method: "DELETE",
-        token
+        token,
       });
       updateMessage(result.message);
       upsertChat(result.chat);
@@ -438,7 +516,7 @@ export default function DashboardPage() {
       const result = await apiFetch(`/api/messages/${messageId}/forward`, {
         method: "POST",
         token,
-        body: { targetChatId }
+        body: { targetChatId },
       });
       addMessage(result.message);
       upsertChat(result.chat);
@@ -460,18 +538,32 @@ export default function DashboardPage() {
 
       <main className="h-screen overflow-hidden bg-[#161717] text-white">
         <div className="flex h-full w-full overflow-hidden bg-[#161717]">
-          <ContactList
-            chats={chats}
-            activeChatId={activeChatId}
-            loading={loading}
-            onSelectChat={handleOpenChat}
-            currentUser={user}
-            query={chatQuery}
-            onQueryChange={setChatQuery}
-          />
+          <aside className="flex flex-col">
+            <button
+              className="mx-5 mt-5 mb-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a] hover:bg-brand-600 transition"
+              onClick={() => loadWorkspace(true)}
+              disabled={loading}
+              title="Reload conversations"
+            >
+              {loading ? "Reloading..." : "Reload Conversations"}
+            </button>
+            <ContactList
+              chats={chats}
+              activeChatId={activeChatId}
+              loading={loading}
+              onSelectChat={handleOpenChat}
+              currentUser={user}
+              query={chatQuery}
+              onQueryChange={setChatQuery}
+            />
+          </aside>
 
           <section className="flex min-w-0 flex-1 flex-col">
-            {error ? <div className="mx-4 mt-4 rounded-2xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-100">{error}</div> : null}
+            {error ? (
+              <div className="mx-4 mt-4 rounded-2xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                {error}
+              </div>
+            ) : null}
 
             <div className="flex min-h-0 flex-1">
               <ChatWindow
@@ -523,6 +615,10 @@ export default function DashboardPage() {
         onSelect={setActiveSession}
         onConnect={handleConnectSession}
         onDisconnect={handleDisconnectSession}
+        onClearSession={handleClearSession}
+        onDeleteSession={handleDeleteSession}
+        connectLoading={connectLoading}
+        qrLoading={qrLoading}
         sessionName={sessionName}
         sessionPhone={sessionPhone}
         onSessionNameChange={setSessionName}
