@@ -174,20 +174,31 @@ export default function DashboardPage() {
 
     socketClient.on("contact_list_update", (chat) => {
       upsertChat(chat);
+      // trigger contacts refresh and show loading badge while fetching
+      setContactsLoading(true);
       loadContacts();
     });
 
     socketClient.on("session_status_update", (session) => {
       upsertSession(session);
+      // If session is connecting, show sync indicator; when ready, refresh workspace
+      if (session.status === "connecting") {
+        setContactsLoading(true);
+      }
+
       if (session.status === "ready") {
         loadWorkspace();
         loadContacts();
+        setContactsLoading(false);
       }
     });
 
     socketClient.on("workspace_synced", () => {
+      // backend finished workspace sync
       loadWorkspace();
       loadContacts();
+      setContactsLoading(false);
+      setMessagesLoading(false);
     });
 
     socketClient.on("typing_event", (payload) => {
@@ -535,6 +546,20 @@ export default function DashboardPage() {
         title="Dashboard"
         description="Dashboard OpenWA untuk mengelola percakapan, kontak, device, dan session WhatsApp."
       />
+
+      {/* Global small loading badge for slow WA syncs */}
+      {contactsLoading || messagesLoading || loading ? (
+        <div className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-md bg-black/60 px-3 py-2 text-sm text-white">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-white/80" />
+          <span>
+            {loading
+              ? "Refreshing workspace..."
+              : contactsLoading
+                ? "Syncing contacts..."
+                : "Fetching messages..."}
+          </span>
+        </div>
+      ) : null}
 
       <main className="h-screen overflow-hidden bg-[#161717] text-white">
         <div className="flex h-full w-full overflow-hidden bg-[#161717]">

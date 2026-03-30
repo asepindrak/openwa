@@ -124,7 +124,11 @@ class WwebjsAdapter extends EventEmitter {
       }),
       puppeteer: {
         headless: true,
+        // Increase protocolTimeout to avoid Runtime.callFunctionOn timed out errors
+        // when WhatsApp/puppeteer operations take longer on slow machines.
+        protocolTimeout: 120000,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        timeout: 0,
       },
     });
 
