@@ -40,10 +40,7 @@ function SessionAvatar({ label }) {
 }
 
 function formatDateTime(value) {
-  if (!value) {
-    return "Never";
-  }
-
+  if (!value) return "Never";
   return new Intl.DateTimeFormat("en-US", {
     day: "2-digit",
     month: "short",
@@ -105,6 +102,7 @@ export function SettingsModal({
   const [toolsOpen, setToolsOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [creatingAssistant, setCreatingAssistant] = useState(false);
+  const [activeTab, setActiveTab] = useState("devices");
 
   function providerHint(key) {
     if (!key) return "";
@@ -200,9 +198,7 @@ export function SettingsModal({
     }
   };
 
-  if (!open) {
-    return null;
-  }
+  if (!open) return null;
 
   return (
     <>
@@ -226,6 +222,7 @@ export function SettingsModal({
                 </h2>
               </div>
             </div>
+
             <div className="flex gap-2">
               <button
                 type="button"
@@ -256,6 +253,7 @@ export function SettingsModal({
               >
                 {creatingAssistant ? "Creating..." : "New Assistant"}
               </button>
+
               <button
                 type="button"
                 className="rounded-2xl bg-[#2e2f2f] px-3 py-1 text-sm text-white/70 transition hover:bg-[#3a3b3b] hover:text-white"
@@ -263,6 +261,7 @@ export function SettingsModal({
               >
                 Edit Tools
               </button>
+
               <button
                 type="button"
                 className="rounded-2xl bg-[#2e2f2f] px-3 py-1 text-sm text-white/70 transition hover:bg-[#3a3b3b] hover:text-white"
@@ -270,6 +269,7 @@ export function SettingsModal({
               >
                 Terminal Monitor
               </button>
+
               <button
                 type="button"
                 className="rounded-full bg-[#2e2f2f] px-4 py-2 text-sm text-white/70 transition hover:bg-[#3a3b3b] hover:text-white"
@@ -338,6 +338,7 @@ export function SettingsModal({
                             ? "Connecting..."
                             : "Connect"}
                         </button>
+
                         <button
                           type="button"
                           className="rounded-2xl bg-[#2e2f2f] px-4 py-2 text-sm text-white/75 disabled:opacity-60"
@@ -353,6 +354,7 @@ export function SettingsModal({
                             ? "Disconnecting..."
                             : "Disconnect"}
                         </button>
+
                         <button
                           type="button"
                           className="rounded-2xl bg-yellow-700 px-4 py-2 text-sm text-white/90"
@@ -363,6 +365,7 @@ export function SettingsModal({
                         >
                           Clear Session
                         </button>
+
                         <button
                           type="button"
                           className="rounded-2xl bg-red-700 px-4 py-2 text-sm text-white/90"
@@ -381,408 +384,468 @@ export function SettingsModal({
             </div>
 
             <div className="min-h-0 overflow-y-auto px-6 py-5">
-              <div className="rounded-[28px] bg-[#161717] p-4">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-                  Pairing QR
-                </p>
-                {qrLoading ? (
-                  <div className="mt-4 rounded-[24px] bg-[#2e2f2f] px-4 py-16 text-center text-sm leading-6 text-white/40">
-                    Loading QR code...
-                  </div>
-                ) : sessions.find((session) => session.id === activeSessionId)
-                    ?.qrCode ? (
-                  <div className="mt-4 rounded-[24px] bg-white p-4">
-                    <img
-                      src={
-                        sessions.find(
-                          (session) => session.id === activeSessionId,
-                        )?.qrCode
-                      }
-                      alt="QR Code"
-                      className="mx-auto h-56 w-56 rounded-2xl"
-                    />
-                  </div>
-                ) : (
-                  <div className="mt-4 rounded-[24px] bg-[#2e2f2f] px-4 py-16 text-center text-sm leading-6 text-white/40">
-                    QR code for pairing will appear here when session is
-                    connecting.
-                  </div>
-                )}
-              </div>
-
-              <form
-                className="mt-5 space-y-3 rounded-[28px] bg-[#161717] p-4"
-                onSubmit={onCreateSession}
-              >
-                <div>
-                  <p className="mb-2 text-[11px] uppercase tracking-[0.24em] text-white/35">
-                    Add device
-                  </p>
-                  <input
-                    className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                    placeholder="Session name, e.g. Sales Team"
-                    value={sessionName}
-                    onChange={(event) =>
-                      onSessionNameChange(event.target.value)
-                    }
-                    required
-                  />
-                </div>
-                <input
-                  className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                  placeholder="WhatsApp number (optional)"
-                  value={sessionPhone}
-                  onChange={(event) => onSessionPhoneChange(event.target.value)}
-                />
+              <div className="mb-4 flex flex-wrap gap-2">
                 <button
-                  type="submit"
-                  className="w-full rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+                  type="button"
+                  className={`rounded-2xl px-4 py-2 text-sm ${
+                    activeTab === "devices"
+                      ? "bg-white/5 text-white"
+                      : "bg-transparent text-white/60 hover:bg-white/[0.04]"
+                  }`}
+                  onClick={() => setActiveTab("devices")}
                 >
-                  Add WhatsApp Session
+                  Devices
                 </button>
-              </form>
 
-              <div className="mt-5 rounded-[28px] bg-[#161717] p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-                      API Access
-                    </p>
-                    <h3 className="mt-2 text-base font-semibold text-white">
-                      Generate API key
-                    </h3>
-                    <p className="mt-2 text-sm leading-6 text-white/45">
-                      Use with external agents via `X-API-Key` header or
-                      `Authorization: Bearer &lt;api-key&gt;`.
-                    </p>
-                    <p className="mt-3 text-sm leading-6 text-white/45">
-                      Webhooks: forward incoming messages to your endpoint. See
-                      the
-                      <a
-                        href="/docs/readme#webhooks"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="ml-1 font-medium text-brand-300 underline"
-                      >
-                        webhook documentation
-                      </a>
-                      for payload details and agent integration.
-                    </p>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  className={`rounded-2xl px-4 py-2 text-sm ${
+                    activeTab === "api"
+                      ? "bg-white/5 text-white"
+                      : "bg-transparent text-white/60 hover:bg-white/[0.04]"
+                  }`}
+                  onClick={() => setActiveTab("api")}
+                >
+                  API Access
+                </button>
 
-                {apiKeySecret ? (
-                  <div className="mt-4 rounded-[22px] bg-[#2e2f2f] p-4">
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-brand-200/80">
-                      Shown once
-                    </p>
-                    <p className="mt-2 break-all font-mono text-sm text-white">
-                      {apiKeySecret}
-                    </p>
-                    <button
-                      type="button"
-                      className="mt-3 rounded-full bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]"
-                      onClick={async () => {
-                        await navigator.clipboard.writeText(apiKeySecret);
-                        setCopied(true);
-                        setTimeout(() => setCopied(false), 1500);
-                      }}
-                    >
-                      {copied ? "Copied" : "Copy API key"}
-                    </button>
-                  </div>
-                ) : null}
+                <button
+                  type="button"
+                  className={`rounded-2xl px-4 py-2 text-sm ${
+                    activeTab === "webhooks"
+                      ? "bg-white/5 text-white"
+                      : "bg-transparent text-white/60 hover:bg-white/[0.04]"
+                  }`}
+                  onClick={() => setActiveTab("webhooks")}
+                >
+                  Webhooks
+                </button>
 
-                <form className="mt-4 flex gap-2" onSubmit={onCreateApiKey}>
-                  <input
-                    className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                    placeholder="Key name, e.g. OpenClaw Agent"
-                    value={apiKeyName}
-                    onChange={(event) => onApiKeyNameChange(event.target.value)}
-                    required
-                  />
-                  <button
-                    type="submit"
-                    className="shrink-0 rounded-[22px] bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
-                    disabled={apiKeysLoading}
-                  >
-                    {apiKeysLoading ? "Generating..." : "Generate"}
-                  </button>
-                </form>
-
-                <div className="mt-4 max-h-[260px] space-y-3 overflow-y-auto pr-1">
-                  {apiKeysLoading ? (
-                    <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm text-white/45">
-                      Loading API keys...
-                    </div>
-                  ) : null}
-
-                  {!apiKeysLoading && !apiKeys.length ? (
-                    <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm leading-6 text-white/45">
-                      No API keys yet. Create one for OpenAPI client, AI agents,
-                      or external integrations.
-                    </div>
-                  ) : null}
-
-                  {apiKeys.map((apiKey) => (
-                    <div
-                      key={apiKey.id}
-                      className="rounded-[22px] bg-[#2e2f2f] px-4 py-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h4 className="truncate text-sm font-semibold text-white">
-                            {apiKey.name}
-                          </h4>
-                          <p className="mt-1 font-mono text-xs text-white/55">
-                            {apiKey.maskedKey}
-                          </p>
-                        </div>
-                        <button
-                          type="button"
-                          className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-red-200 transition hover:bg-red-500/15"
-                          onClick={() => onRevokeApiKey(apiKey.id)}
-                          disabled={
-                            apiKeysLoading || revokingKeyId === apiKey.id
-                          }
-                        >
-                          {revokingKeyId === apiKey.id
-                            ? "Revoking..."
-                            : "Revoke"}
-                        </button>
-                      </div>
-                      <div className="mt-3 grid gap-2 text-xs text-white/40">
-                        <p>Created: {formatDateTime(apiKey.createdAt)}</p>
-                        <p>Last used: {formatDateTime(apiKey.lastUsedAt)}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  className={`rounded-2xl px-4 py-2 text-sm ${
+                    activeTab === "ai"
+                      ? "bg-white/5 text-white"
+                      : "bg-transparent text-white/60 hover:bg-white/[0.04]"
+                  }`}
+                  onClick={() => setActiveTab("ai")}
+                >
+                  AI Providers
+                </button>
               </div>
 
-              <div className="mt-5 rounded-[28px] bg-[#161717] p-4">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-                  Webhooks
-                </p>
-                <h3 className="mt-2 text-base font-semibold text-white">
-                  Incoming message webhook
-                </h3>
-                <p className="mt-2 text-sm leading-6 text-white/45">
-                  Forward incoming messages to this endpoint. The runtime will
-                  POST a JSON payload and include header{" "}
-                  <span className="font-mono">x-openwa-webhook-key</span> with
-                  the value you provide.
-                </p>
+              {activeTab === "devices" && (
+                <>
+                  <div className="rounded-[28px] bg-[#161717] p-4">
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+                      Pairing QR
+                    </p>
+                    {qrLoading ? (
+                      <div className="mt-4 rounded-[24px] bg-[#2e2f2f] px-4 py-16 text-center text-sm leading-6 text-white/40">
+                        Loading QR code...
+                      </div>
+                    ) : sessions.find(
+                        (session) => session.id === activeSessionId,
+                      )?.qrCode ? (
+                      <div className="mt-4 rounded-[24px] bg-white p-4">
+                        <img
+                          src={
+                            sessions.find(
+                              (session) => session.id === activeSessionId,
+                            )?.qrCode
+                          }
+                          alt="QR Code"
+                          className="mx-auto h-56 w-56 rounded-2xl"
+                        />
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-[24px] bg-[#2e2f2f] px-4 py-16 text-center text-sm leading-6 text-white/40">
+                        QR code for pairing will appear here when session is
+                        connecting.
+                      </div>
+                    )}
+                  </div>
 
-                <form
-                  className="mt-4 space-y-3"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    onSaveWebhook();
-                  }}
-                >
-                  <input
-                    className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                    placeholder="https://example.com/openwa-webhook"
-                    value={webhookUrl || ""}
-                    onChange={(e) => onWebhookUrlChange(e.target.value)}
-                  />
-
-                  <input
-                    className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                    placeholder="Optional webhook API key (sent as x-openwa-webhook-key)"
-                    value={webhookApiKey || ""}
-                    onChange={(e) => onWebhookApiKeyChange(e.target.value)}
-                  />
-
-                  <div className="flex gap-2">
+                  <form
+                    className="mt-5 space-y-3 rounded-[28px] bg-[#161717] p-4"
+                    onSubmit={onCreateSession}
+                  >
+                    <div>
+                      <p className="mb-2 text-[11px] uppercase tracking-[0.24em] text-white/35">
+                        Add device
+                      </p>
+                      <input
+                        className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                        placeholder="Session name, e.g. Sales Team"
+                        value={sessionName}
+                        onChange={(event) =>
+                          onSessionNameChange(event.target.value)
+                        }
+                        required
+                      />
+                    </div>
+                    <input
+                      className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                      placeholder="WhatsApp number (optional)"
+                      value={sessionPhone}
+                      onChange={(event) =>
+                        onSessionPhoneChange(event.target.value)
+                      }
+                    />
                     <button
                       type="submit"
-                      className="rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
-                      disabled={webhookLoading}
+                      className="w-full rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
                     >
-                      {webhookLoading ? "Saving..." : "Save webhook"}
+                      Add WhatsApp Session
                     </button>
-                    <button
-                      type="button"
-                      className="rounded-2xl bg-red-700 px-4 py-3 text-sm text-white/90"
-                      onClick={() => onDeleteWebhook()}
-                      disabled={webhookLoading}
-                    >
-                      {webhookLoading ? "Removing..." : "Remove webhook"}
-                    </button>
-                  </div>
-                </form>
-              </div>
+                  </form>
+                </>
+              )}
 
-              <div className="mt-5 rounded-[28px] bg-[#161717] p-4">
-                <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
-                  AI Providers
-                </p>
-                <h3 className="mt-2 text-base font-semibold text-white">
-                  Manage LLM providers
-                </h3>
-                <div className="mt-2">
-                  <button
-                    type="button"
-                    className="rounded-2xl bg-white/5 px-3 py-2 text-sm font-medium text-white/80"
-                    onClick={() => setToolsOpen(true)}
-                  >
-                    Edit Assistant Tools
-                  </button>
-                </div>
-                <p className="mt-2 text-sm leading-6 text-white/45">
-                  Add provider configs for OpenAI, Anthropic, Ollama,
-                  OpenRouter, then fetch available models.
-                </p>
-
-                <form
-                  className="mt-4 space-y-3"
-                  onSubmit={handleCreateProvider}
-                >
-                  <div className="grid grid-cols-3 gap-2">
-                    <input
-                      className="col-span-2 w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                      placeholder="Provider name (e.g. My OpenAI)"
-                      value={providerName}
-                      onChange={(e) => setProviderName(e.target.value)}
-                      required
-                    />
-
-                    <select
-                      className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none"
-                      value={providerKey}
-                      onChange={(e) => setProviderKey(e.target.value)}
-                      required
-                    >
-                      <option value="">Select provider</option>
-                      <option value="openai">OpenAI</option>
-                      <option value="anthropic">Anthropic</option>
-                      <option value="ollama">Ollama</option>
-                      <option value="openrouter">OpenRouter</option>
-                    </select>
+              {activeTab === "api" && (
+                <div className="rounded-[28px] bg-[#161717] p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+                        API Access
+                      </p>
+                      <h3 className="mt-2 text-base font-semibold text-white">
+                        Generate API key
+                      </h3>
+                      <p className="mt-2 text-sm leading-6 text-white/45">
+                        Use with external agents via `X-API-Key` header or
+                        `Authorization: Bearer &lt;api-key&gt;`.
+                      </p>
+                      <p className="mt-3 text-sm leading-6 text-white/45">
+                        Webhooks: forward incoming messages to your endpoint.
+                        See the{" "}
+                        <a
+                          href="/docs/readme#webhooks"
+                          target="_blank"
+                          rel="noreferrer"
+                          className="ml-1 font-medium text-brand-300 underline"
+                        >
+                          webhook documentation
+                        </a>{" "}
+                        for payload details and agent integration.
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="grid gap-2">
-                    <div className="flex gap-2">
-                      <input
-                        className="flex-1 w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                        placeholder="API key (sensitive, optional)"
-                        value={providerApiKey}
-                        onChange={(e) => setProviderApiKey(e.target.value)}
-                        type={showApiKey ? "text" : "password"}
-                      />
+                  {apiKeySecret ? (
+                    <div className="mt-4 rounded-[22px] bg-[#2e2f2f] p-4">
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-brand-200/80">
+                        Shown once
+                      </p>
+                      <p className="mt-2 break-all font-mono text-sm text-white">
+                        {apiKeySecret}
+                      </p>
                       <button
                         type="button"
-                        className="rounded-[22px] bg-white/5 px-4 py-3 text-sm text-white/70"
-                        onClick={() => setShowApiKey((s) => !s)}
+                        className="mt-3 rounded-full bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]"
+                        onClick={async () => {
+                          await navigator.clipboard.writeText(apiKeySecret);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        }}
                       >
-                        {showApiKey ? "Hide" : "Show"}
+                        {copied ? "Copied" : "Copy API key"}
                       </button>
                     </div>
+                  ) : null}
 
+                  <form className="mt-4 flex gap-2" onSubmit={onCreateApiKey}>
                     <input
                       className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                      placeholder="Host (e.g. http://localhost:11434)"
-                      value={providerHost}
-                      onChange={(e) => setProviderHost(e.target.value)}
+                      placeholder="Key name, e.g. OpenClaw Agent"
+                      value={apiKeyName}
+                      onChange={(event) =>
+                        onApiKeyNameChange(event.target.value)
+                      }
+                      required
                     />
-
-                    <input
-                      className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
-                      placeholder="Default model (optional)"
-                      value={providerModel}
-                      onChange={(e) => setProviderModel(e.target.value)}
-                    />
-
-                    <p className="text-xs text-white/45">
-                      {providerHint(providerKey)}
-                    </p>
-                  </div>
-
-                  <div className="flex gap-2">
                     <button
                       type="submit"
-                      className="rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a] disabled:opacity-60"
-                      disabled={addingProvider}
-                      aria-busy={addingProvider}
+                      className="shrink-0 rounded-[22px] bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+                      disabled={apiKeysLoading}
                     >
-                      {addingProvider ? "Adding..." : "Add provider"}
+                      {apiKeysLoading ? "Generating..." : "Generate"}
+                    </button>
+                  </form>
+
+                  <div className="mt-4 max-h-[260px] space-y-3 overflow-y-auto pr-1">
+                    {apiKeysLoading ? (
+                      <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm text-white/45">
+                        Loading API keys...
+                      </div>
+                    ) : null}
+
+                    {!apiKeysLoading && !apiKeys.length ? (
+                      <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm leading-6 text-white/45">
+                        No API keys yet. Create one for OpenAPI client, AI
+                        agents, or external integrations.
+                      </div>
+                    ) : null}
+
+                    {apiKeys.map((apiKey) => (
+                      <div
+                        key={apiKey.id}
+                        className="rounded-[22px] bg-[#2e2f2f] px-4 py-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h4 className="truncate text-sm font-semibold text-white">
+                              {apiKey.name}
+                            </h4>
+                            <p className="mt-1 font-mono text-xs text-white/55">
+                              {apiKey.maskedKey}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-red-200 transition hover:bg-red-500/15"
+                            onClick={() => onRevokeApiKey(apiKey.id)}
+                            disabled={
+                              apiKeysLoading || revokingKeyId === apiKey.id
+                            }
+                          >
+                            {revokingKeyId === apiKey.id
+                              ? "Revoking..."
+                              : "Revoke"}
+                          </button>
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs text-white/40">
+                          <p>Created: {formatDateTime(apiKey.createdAt)}</p>
+                          <p>Last used: {formatDateTime(apiKey.lastUsedAt)}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "webhooks" && (
+                <div className="rounded-[28px] bg-[#161717] p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+                    Webhooks
+                  </p>
+                  <h3 className="mt-2 text-base font-semibold text-white">
+                    Incoming message webhook
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-white/45">
+                    Forward incoming messages to this endpoint. The runtime will
+                    POST a JSON payload and include header{" "}
+                    <span className="font-mono">x-openwa-webhook-key</span> with
+                    the value you provide.
+                  </p>
+
+                  <form
+                    className="mt-4 space-y-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      onSaveWebhook();
+                    }}
+                  >
+                    <input
+                      className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                      placeholder="https://example.com/openwa-webhook"
+                      value={webhookUrl || ""}
+                      onChange={(e) => onWebhookUrlChange(e.target.value)}
+                    />
+                    <input
+                      className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                      placeholder="Optional webhook API key (sent as x-openwa-webhook-key)"
+                      value={webhookApiKey || ""}
+                      onChange={(e) => onWebhookApiKeyChange(e.target.value)}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+                        disabled={webhookLoading}
+                      >
+                        {webhookLoading ? "Saving..." : "Save webhook"}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-2xl bg-red-700 px-4 py-3 text-sm text-white/90"
+                        onClick={() => onDeleteWebhook()}
+                        disabled={webhookLoading}
+                      >
+                        {webhookLoading ? "Removing..." : "Remove webhook"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
+
+              {activeTab === "ai" && (
+                <div className="rounded-[28px] bg-[#161717] p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+                    AI Providers
+                  </p>
+                  <h3 className="mt-2 text-base font-semibold text-white">
+                    Manage LLM providers
+                  </h3>
+                  <div className="mt-2">
+                    <button
+                      type="button"
+                      className="rounded-2xl bg-white/5 px-3 py-2 text-sm font-medium text-white/80"
+                      onClick={() => setToolsOpen(true)}
+                    >
+                      Edit Assistant Tools
                     </button>
                   </div>
-                </form>
+                  <p className="mt-2 text-sm leading-6 text-white/45">
+                    Add provider configs for OpenAI, Anthropic, Ollama,
+                    OpenRouter, then fetch available models.
+                  </p>
 
-                <div className="mt-4 max-h-[200px] space-y-3 overflow-y-auto pr-1">
-                  {providersLoading ? (
-                    <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm text-white/45">
-                      Loading providers...
+                  <form
+                    className="mt-4 space-y-3"
+                    onSubmit={handleCreateProvider}
+                  >
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        className="col-span-2 w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                        placeholder="Provider name (e.g. My OpenAI)"
+                        value={providerName}
+                        onChange={(e) => setProviderName(e.target.value)}
+                        required
+                      />
+                      <select
+                        className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none"
+                        value={providerKey}
+                        onChange={(e) => setProviderKey(e.target.value)}
+                        required
+                      >
+                        <option value="">Select provider</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="ollama">Ollama</option>
+                        <option value="openrouter">OpenRouter</option>
+                      </select>
                     </div>
-                  ) : null}
 
-                  {!providersLoading && !providers.length ? (
-                    <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm leading-6 text-white/45">
-                      No providers configured.
-                    </div>
-                  ) : null}
-
-                  {providers.map((p) => (
-                    <div
-                      key={p.id}
-                      className="rounded-[22px] bg-[#2e2f2f] px-4 py-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h4 className="truncate text-sm font-semibold text-white">
-                            {p.name}
-                          </h4>
-                          <p className="mt-1 text-xs text-white/55">
-                            {p.provider}
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80"
-                            onClick={() => handleFetchModels(p.id)}
-                            disabled={modelsLoadingId === p.id}
-                          >
-                            {modelsLoadingId === p.id
-                              ? "Fetching..."
-                              : "Fetch models"}
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-full bg-red-700 px-3 py-1.5 text-xs font-medium text-white/80"
-                            onClick={() => handleDeleteProvider(p.id)}
-                          >
-                            Delete
-                          </button>
-                        </div>
+                    <div className="grid gap-2">
+                      <div className="flex gap-2">
+                        <input
+                          className="flex-1 w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                          placeholder="API key (sensitive, optional)"
+                          value={providerApiKey}
+                          onChange={(e) => setProviderApiKey(e.target.value)}
+                          type={showApiKey ? "text" : "password"}
+                        />
+                        <button
+                          type="button"
+                          className="rounded-[22px] bg-white/5 px-4 py-3 text-sm text-white/70"
+                          onClick={() => setShowApiKey((s) => !s)}
+                        >
+                          {showApiKey ? "Hide" : "Show"}
+                        </button>
                       </div>
 
-                      <div className="mt-3 text-xs text-white/40">
-                        <p>Created: {formatDateTime(p.createdAt)}</p>
-                      </div>
+                      <input
+                        className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                        placeholder="Host (e.g. http://localhost:11434)"
+                        value={providerHost}
+                        onChange={(e) => setProviderHost(e.target.value)}
+                      />
+                      <input
+                        className="w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                        placeholder="Default model (optional)"
+                        value={providerModel}
+                        onChange={(e) => setProviderModel(e.target.value)}
+                      />
+                      <p className="text-xs text-white/45">
+                        {providerHint(providerKey)}
+                      </p>
+                    </div>
 
-                      {modelsMap[p.id] && modelsMap[p.id].length ? (
-                        <div className="mt-3 grid gap-2">
-                          <p className="text-xs text-white/45">Models:</p>
-                          <div className="flex flex-wrap gap-2 mt-2">
-                            {modelsMap[p.id].map((m) => (
-                              <span
-                                key={m.id}
-                                className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/60"
-                              >
-                                {m.name || m.id}
-                              </span>
-                            ))}
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a] disabled:opacity-60"
+                        disabled={addingProvider}
+                        aria-busy={addingProvider}
+                      >
+                        {addingProvider ? "Adding..." : "Add provider"}
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="mt-4 max-h-[200px] space-y-3 overflow-y-auto pr-1">
+                    {providersLoading ? (
+                      <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm text-white/45">
+                        Loading providers...
+                      </div>
+                    ) : null}
+
+                    {!providersLoading && !providers.length ? (
+                      <div className="rounded-[22px] bg-[#2e2f2f] px-4 py-6 text-sm leading-6 text-white/45">
+                        No providers configured.
+                      </div>
+                    ) : null}
+
+                    {providers.map((p) => (
+                      <div
+                        key={p.id}
+                        className="rounded-[22px] bg-[#2e2f2f] px-4 py-4"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h4 className="truncate text-sm font-semibold text-white">
+                              {p.name}
+                            </h4>
+                            <p className="mt-1 text-xs text-white/55">
+                              {p.provider}
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80"
+                              onClick={() => handleFetchModels(p.id)}
+                              disabled={modelsLoadingId === p.id}
+                            >
+                              {modelsLoadingId === p.id
+                                ? "Fetching..."
+                                : "Fetch models"}
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-full bg-red-700 px-3 py-1.5 text-xs font-medium text-white/80"
+                              onClick={() => handleDeleteProvider(p.id)}
+                            >
+                              Delete
+                            </button>
                           </div>
                         </div>
-                      ) : null}
-                    </div>
-                  ))}
+
+                        <div className="mt-3 text-xs text-white/40">
+                          <p>Created: {formatDateTime(p.createdAt)}</p>
+                        </div>
+
+                        {modelsMap[p.id] && modelsMap[p.id].length ? (
+                          <div className="mt-3 grid gap-2">
+                            <p className="text-xs text-white/45">Models:</p>
+                            <div className="flex flex-wrap gap-2 mt-2">
+                              {modelsMap[p.id].map((m) => (
+                                <span
+                                  key={m.id}
+                                  className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/60"
+                                >
+                                  {m.name || m.id}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
