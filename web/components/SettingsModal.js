@@ -107,6 +107,7 @@ export function SettingsModal({
   const [addingProvider, setAddingProvider] = useState(false);
   const [modelsMap, setModelsMap] = useState({});
   const [modelsLoadingId, setModelsLoadingId] = useState(null);
+  const [manualModelByProvider, setManualModelByProvider] = useState({});
   const [toolsOpen, setToolsOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [creatingAssistant, setCreatingAssistant] = useState(false);
@@ -921,6 +922,60 @@ export function SettingsModal({
                             </div>
                           </div>
                         ) : null}
+                        <div className="mt-2">
+                          <p className="text-xs text-white/45">Manual model</p>
+                          <div className="flex items-center gap-2 mt-2">
+                            <input
+                              className="flex-1 w-full rounded-[10px] bg-[#0f1111] px-3 py-2 text-sm text-white outline-none"
+                              placeholder="Enter model id (e.g. copilot/gpt-5-mini)"
+                              value={manualModelByProvider[p.id] || ""}
+                              onChange={(e) =>
+                                setManualModelByProvider((prev) => ({
+                                  ...(prev || {}),
+                                  [p.id]: e.target.value,
+                                }))
+                              }
+                              onKeyDown={async (e) => {
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  const val =
+                                    (
+                                      manualModelByProvider[p.id] ||
+                                      e.target.value ||
+                                      ""
+                                    )
+                                      .trim()
+                                      .replace(/^\s+|\s+$/g, "") || null;
+                                  try {
+                                    await setDefaultAiProvider(p.id);
+                                    await setDefaultAiModel(val);
+                                  } catch (err) {
+                                    // ignore
+                                  }
+                                }
+                              }}
+                              autoComplete="off"
+                            />
+                            <button
+                              type="button"
+                              className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/80"
+                              onClick={async () => {
+                                const val =
+                                  (manualModelByProvider[p.id] || "")
+                                    .trim()
+                                    .replace(/^\s+|\s+$/g, "") || null;
+                                try {
+                                  await setDefaultAiProvider(p.id);
+                                  await setDefaultAiModel(val);
+                                } catch (err) {
+                                  // ignore
+                                }
+                              }}
+                            >
+                              Set
+                            </button>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
