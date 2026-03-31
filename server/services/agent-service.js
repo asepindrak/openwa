@@ -20,6 +20,7 @@ const terminalService = require("./terminal-service");
 const { prisma } = require("../database/client");
 const { v4: uuidv4 } = require("uuid");
 const toolCredentialService = require("./tool-credential-service");
+const userSettings = require("./user-settings");
 const OS_NAME_MAP = { win32: "Windows", darwin: "macOS", linux: "Linux" };
 const hostPlatform = process.platform || "unknown";
 const hostOS = OS_NAME_MAP[hostPlatform] || hostPlatform;
@@ -545,12 +546,27 @@ const tools = {
     return { ok: true, webhook: cfg };
   },
   run_terminal: async (userId, args, ctx) => {
-    const { command, approvalMode = "manual", timeout = 300000 } = args || {};
+    const { command, approvalMode, timeout = 300000 } = args || {};
     if (!command) throw new Error("command is required");
+
+    // If the user has enabled auto-approve in settings, prefer auto when
+    // approvalMode isn't explicitly set to 'manual'. This ensures server-side
+    // agent invocations follow the user's toggle.
+    let effectiveApprovalMode = approvalMode;
+    try {
+      const pref = await userSettings.getSetting(
+        userId,
+        "autoApproveAllTerminalCommands",
+      );
+      if (!effectiveApprovalMode && pref) effectiveApprovalMode = "auto";
+    } catch (e) {
+      // ignore and fallback to provided/default
+    }
+
     // Pass socket/io so terminal-service can emit request/result events
     const res = await terminalService.requestExecution(
       userId,
-      { command, approvalMode, timeout },
+      { command, approvalMode: effectiveApprovalMode, timeout },
       ctx && ctx.io,
     );
     return res;

@@ -53,6 +53,7 @@ model User {
   apiKeys          ApiKey[]
   aiProviders      AiProvider[]
   terminalCommands TerminalCommand[]
+  userSetting      UserSetting?
 
   @@map("users")
 }
@@ -226,4 +227,20 @@ model TerminalCommand {
 
   @@index([userId, status])
   @@map("terminal_commands")
+}
+
+// Per-user persistent settings. Kept separate from User to avoid
+// risky modifications to the existing users table and ease migrations.
+model UserSetting {
+  id                             String   @id @default(cuid())
+  userId                         String   @unique
+  autoApproveAllTerminalCommands Boolean  @default(false)
+  defaultAiProviderId            String?
+  defaultAiModel                 String?
+  createdAt                      DateTime @default(now())
+  updatedAt                      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
 }

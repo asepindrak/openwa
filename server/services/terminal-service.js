@@ -1,6 +1,7 @@
 const { spawn } = require("child_process");
 const { prisma } = require("../database/client");
 const { getConfig } = require("../config");
+const userSettings = require("./user-settings");
 
 function runShellCommand(command, timeout = 300000, cwd) {
   return new Promise((resolve) => {
@@ -70,6 +71,17 @@ async function requestExecution(
     .map((s) => s.trim())
     .filter(Boolean);
 
+  // Check in-memory per-user setting for bypassing the host allowlist
+  let userPrefAuto = false;
+  try {
+    userPrefAuto = !!(await userSettings.getSetting(
+      userId,
+      "autoApproveAllTerminalCommands",
+    ));
+  } catch (e) {
+    // ignore
+  }
+
   const record = await prisma.terminalCommand.create({
     data: {
       userId,
@@ -79,11 +91,13 @@ async function requestExecution(
     },
   });
 
-  // Auto-execute only when explicitly requested and allowed by allowlist
+  // Auto-execute when explicitly requested and either the user has enabled
+  // bypassing the host allowlist or the command matches the configured allowlist.
   const canAuto =
     approvalMode === "auto" &&
-    allowlist.length > 0 &&
-    allowlist.some((a) => command.trim().startsWith(a));
+    (userPrefAuto ||
+      (allowlist.length > 0 &&
+        allowlist.some((a) => command.trim().startsWith(a))));
   if (canAuto) {
     await prisma.terminalCommand.update({
       where: { id: record.id },

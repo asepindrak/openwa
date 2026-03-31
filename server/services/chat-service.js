@@ -1188,6 +1188,7 @@ module.exports = {
   createMediaFile,
   createOutgoingMessage,
   createSessionCompanionChat,
+  createAssistantConversation,
   deleteMessage,
   ensureWelcomeWorkspace,
   forwardMessage,

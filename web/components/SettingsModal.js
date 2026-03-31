@@ -87,6 +87,14 @@ export function SettingsModal({
   const token = useAppStore((s) => s.token);
   const setActiveChat = useAppStore((s) => s.setActiveChat);
   const upsertChat = useAppStore((s) => s.upsertChat);
+  const terminalAutoApproveAll = useAppStore((s) => s.terminalAutoApproveAll);
+  const setTerminalAutoApproveAll = useAppStore(
+    (s) => s.setTerminalAutoApproveAll,
+  );
+  const defaultAiProviderId = useAppStore((s) => s.defaultAiProviderId);
+  const defaultAiModel = useAppStore((s) => s.defaultAiModel);
+  const setDefaultAiProvider = useAppStore((s) => s.setDefaultAiProvider);
+  const setDefaultAiModel = useAppStore((s) => s.setDefaultAiModel);
 
   const [providers, setProviders] = useState([]);
   const [providersLoading, setProvidersLoading] = useState(false);
@@ -103,6 +111,13 @@ export function SettingsModal({
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [creatingAssistant, setCreatingAssistant] = useState(false);
   const [activeTab, setActiveTab] = useState("devices");
+
+  const activeProvider = providers.find((p) => p.id === defaultAiProviderId);
+  const activeModelName =
+    defaultAiModel && modelsMap[defaultAiProviderId]
+      ? modelsMap[defaultAiProviderId].find((m) => m.id === defaultAiModel)
+          ?.name || defaultAiModel
+      : defaultAiModel || null;
 
   function providerHint(key) {
     if (!key) return "";
@@ -220,6 +235,17 @@ export function SettingsModal({
                 <h2 className="mt-2 text-xl font-semibold text-white">
                   OpenWA Devices
                 </h2>
+                <div className="mt-1 text-sm text-white/60">
+                  <span className="font-medium text-white/85">AI:</span>{" "}
+                  {activeProvider ? (
+                    <span>
+                      {activeProvider.name} ({activeProvider.provider})
+                      {activeModelName ? ` — ${activeModelName}` : ""}
+                    </span>
+                  ) : (
+                    <span>None active</span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -431,6 +457,17 @@ export function SettingsModal({
                   onClick={() => setActiveTab("ai")}
                 >
                   AI Providers
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-2xl px-4 py-2 text-sm ${
+                    activeTab === "advanced"
+                      ? "bg-white/5 text-white"
+                      : "bg-transparent text-white/60 hover:bg-white/[0.04]"
+                  }`}
+                  onClick={() => setActiveTab("advanced")}
+                >
+                  Advanced
                 </button>
               </div>
 
@@ -709,6 +746,7 @@ export function SettingsModal({
                       <input
                         className="col-span-2 w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
                         placeholder="Provider name (e.g. My OpenAI)"
+                        autoComplete="off"
                         value={providerName}
                         onChange={(e) => setProviderName(e.target.value)}
                         required
@@ -733,6 +771,7 @@ export function SettingsModal({
                           className="flex-1 w-full rounded-[22px] bg-[#2e2f2f] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
                           placeholder="API key (sensitive, optional)"
                           value={providerApiKey}
+                          autoComplete="off"
                           onChange={(e) => setProviderApiKey(e.target.value)}
                           type={showApiKey ? "text" : "password"}
                         />
@@ -829,20 +868,99 @@ export function SettingsModal({
                         {modelsMap[p.id] && modelsMap[p.id].length ? (
                           <div className="mt-3 grid gap-2">
                             <p className="text-xs text-white/45">Models:</p>
-                            <div className="flex flex-wrap gap-2 mt-2">
-                              {modelsMap[p.id].map((m) => (
-                                <span
-                                  key={m.id}
-                                  className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/60"
+                            <div className="flex items-center justify-between gap-2 mt-2">
+                              <div className="flex-1">
+                                <select
+                                  className="w-full rounded-[10px] bg-[#0f1111] px-3 py-2 text-sm text-white outline-none"
+                                  value={
+                                    defaultAiProviderId === p.id &&
+                                    defaultAiModel
+                                      ? defaultAiModel
+                                      : ""
+                                  }
+                                  onChange={async (e) => {
+                                    const modelId = e.target.value || null;
+                                    try {
+                                      await setDefaultAiProvider(p.id);
+                                      await setDefaultAiModel(modelId);
+                                    } catch (err) {
+                                      // ignore
+                                    }
+                                  }}
                                 >
-                                  {m.name || m.id}
-                                </span>
-                              ))}
+                                  <option value="">
+                                    Select model (set as default)
+                                  </option>
+                                  {modelsMap[p.id].map((m) => (
+                                    <option key={m.id} value={m.id}>
+                                      {m.name || m.id}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                {defaultAiProviderId === p.id ? (
+                                  <span className="rounded-full bg-emerald-600 px-3 py-1 text-xs text-white">
+                                    Active
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/80"
+                                    onClick={async () => {
+                                      try {
+                                        await setDefaultAiProvider(p.id);
+                                      } catch (err) {}
+                                    }}
+                                  >
+                                    Set active
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         ) : null}
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "advanced" && (
+                <div className="rounded-[28px] bg-[#161717] p-4">
+                  <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
+                    Advanced
+                  </p>
+                  <h3 className="mt-2 text-base font-semibold text-white">
+                    Terminal auto-approve
+                  </h3>
+                  <p className="mt-2 text-sm leading-6 text-white/45">
+                    When enabled, terminal commands requested with approvalMode
+                    "auto" will be executed immediately without checking the
+                    host allowlist. Use with caution.
+                  </p>
+
+                  <div className="mt-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm text-white">
+                        Auto-approve terminal commands
+                      </div>
+                      <div className="text-xs text-white/45">
+                        Bypass OPENWA_TERMINAL_ALLOWLIST and allow auto
+                        execution of any command.
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      className={`rounded-full px-3 py-1 text-sm ${terminalAutoApproveAll ? "bg-emerald-600 text-white" : "bg-white/5 text-white/60"}`}
+                      onClick={() =>
+                        setTerminalAutoApproveAll(!terminalAutoApproveAll)
+                      }
+                    >
+                      {terminalAutoApproveAll ? "Enabled" : "Disabled"}
+                    </button>
                   </div>
                 </div>
               )}

@@ -19,6 +19,7 @@ const llmService = require("../services/llm-service");
 const agentService = require("../services/agent-service");
 const terminalService = require("../services/terminal-service");
 const toolCredentialService = require("../services/tool-credential-service");
+const userSettings = require("../services/user-settings");
 const {
   createAgentReadme,
   createOpenApiDocument,
@@ -594,6 +595,29 @@ function createApp({ config, sessionManager }) {
         ? await chatService.listMessages(req.user.id, activeChatId)
         : { messages: [], hasMore: false, nextBefore: null };
 
+      // Load persistent user settings and include in bootstrap payload
+      let settings = {};
+      try {
+        const autoApprove = await userSettings.getSetting(
+          req.user.id,
+          "autoApproveAllTerminalCommands",
+        );
+        const defaultAiProviderId = await userSettings.getSetting(
+          req.user.id,
+          "defaultAiProviderId",
+        );
+        const defaultAiModel = await userSettings.getSetting(
+          req.user.id,
+          "defaultAiModel",
+        );
+
+        settings.autoApproveAllTerminalCommands = !!autoApprove;
+        settings.defaultAiProviderId = defaultAiProviderId || null;
+        settings.defaultAiModel = defaultAiModel || null;
+      } catch (e) {
+        settings = {};
+      }
+
       res.json({
         user: req.user,
         sessions,
@@ -602,6 +626,7 @@ function createApp({ config, sessionManager }) {
         messages: messageResult.messages,
         hasMoreMessages: messageResult.hasMore,
         nextBefore: messageResult.nextBefore,
+        settings,
       });
     } catch (error) {
       res.status(error?.code === "P1008" ? 503 : 500).json({
@@ -683,9 +708,22 @@ function createApp({ config, sessionManager }) {
       if (!command)
         return res.status(400).json({ error: "command is required" });
       const io = req.app.get("io");
+      // If user has enabled server-side auto-approve, prefer 'auto' when
+      // approvalMode isn't explicitly set to 'manual'.
+      let effectiveApprovalMode = approvalMode;
+      try {
+        const pref = await userSettings.getSetting(
+          req.user.id,
+          "autoApproveAllTerminalCommands",
+        );
+        if (!effectiveApprovalMode && pref) effectiveApprovalMode = "auto";
+      } catch (e) {
+        // ignore
+      }
+
       const result = await terminalService.requestExecution(
         req.user.id,
-        { command, approvalMode, timeout },
+        { command, approvalMode: effectiveApprovalMode, timeout },
         io,
       );
       res.json(result);
@@ -782,6 +820,34 @@ function createApp({ config, sessionManager }) {
         io,
       );
       res.json({ ok: true, result });
+    }),
+  );
+
+  // Update user settings (e.g. terminal auto-approve preference)
+  app.post(
+    "/api/user/settings",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const {
+        autoApproveAllTerminalCommands,
+        defaultAiProviderId,
+        defaultAiModel,
+      } = req.body || {};
+      try {
+        const payload = {};
+        if (autoApproveAllTerminalCommands !== undefined)
+          payload.autoApproveAllTerminalCommands =
+            !!autoApproveAllTerminalCommands;
+        if (defaultAiProviderId !== undefined)
+          payload.defaultAiProviderId = defaultAiProviderId || null;
+        if (defaultAiModel !== undefined)
+          payload.defaultAiModel = defaultAiModel || null;
+
+        await userSettings.setBulk(req.user.id, payload);
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(500).json({ error: err.message });
+      }
     }),
   );
 
