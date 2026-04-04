@@ -117,8 +117,7 @@ async function startOpenWA({ dev = false } = {}) {
   });
   const io = new Server(backendServer, {
     cors: {
-      origin: config.frontendUrl,
-      credentials: true,
+      origin: "*",
     },
   });
 

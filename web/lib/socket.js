@@ -1,4 +1,5 @@
 import { io } from "socket.io-client";
+import { getApiBaseUrl } from "./api";
 
 function detectPlatform() {
   if (typeof navigator === "undefined") return "unknown";
@@ -13,7 +14,9 @@ function detectPlatform() {
 
 export function createSocket(token) {
   const platform = typeof navigator !== "undefined" ? detectPlatform() : null;
-  return io(process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:55222", {
+  const socketBaseUrl = getApiBaseUrl();
+
+  return io(socketBaseUrl, {
     auth: {
       token,
       platform,

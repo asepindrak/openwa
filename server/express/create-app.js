@@ -82,8 +82,7 @@ function createApp({ config, sessionManager }) {
   const app = express();
   // CORS middleware harus di paling atas
   app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", config.frontendUrl);
-    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Origin", "*");
     res.header(
       "Access-Control-Allow-Headers",
       "Content-Type, Authorization, X-API-Key, X-OpenWA-API-Key, X-Client-Platform",

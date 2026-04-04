@@ -1,6 +1,35 @@
-export function getApiBaseUrl() {
-  return process.env.NEXT_PUBLIC_API_URL || "http://localhost:55222";
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function normalizeBaseUrl(url) {
+  return String(url || "").replace(/\/+$/, "");
 }
+
+function isLoopbackHost(hostname) {
+  return LOOPBACK_HOSTS.has(String(hostname || "").toLowerCase());
+}
+
+export function getApiBaseUrl() {
+  const configuredUrl = normalizeBaseUrl(
+    process.env.NEXT_PUBLIC_API_URL || "http://localhost:55222",
+  );
+
+  if (typeof window === "undefined") {
+    return configuredUrl;
+  }
+
+  try {
+    const resolvedUrl = new URL(configuredUrl);
+
+    if (isLoopbackHost(resolvedUrl.hostname)) {
+      resolvedUrl.hostname = window.location.hostname;
+    }
+
+    return normalizeBaseUrl(resolvedUrl.toString());
+  } catch {
+    return configuredUrl;
+  }
+}
+
 function detectPlatform() {
   if (typeof navigator === "undefined") return null;
   const ua = navigator.userAgent || "";
