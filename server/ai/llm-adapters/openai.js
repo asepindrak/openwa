@@ -1,3 +1,74 @@
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractOpenAiText(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item.text === "string") return item.text;
+        return "";
+      })
+      .join("")
+      .trim();
+  }
+  return data?.choices?.[0]?.text ?? "";
+}
+
+function hasChoices(data) {
+  return Array.isArray(data?.choices) && data.choices.length > 0;
+}
+
+function isRetriableOpenAiFailure(status, bodyText, data) {
+  if (status >= 500) return true;
+  if (data && !hasChoices(data)) return true;
+  return /response contained no choices/i.test(String(bodyText || ""));
+}
+
+async function postOpenAiJson(url, apiKey, body, maxAttempts = 2) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      lastError = new Error(`OpenAI request failed: ${res.status} ${text}`);
+
+      if (attempt < maxAttempts && isRetriableOpenAiFailure(res.status, text)) {
+        await delay(250 * attempt);
+        continue;
+      }
+
+      throw lastError;
+    }
+
+    const data = await res.json();
+    if (!hasChoices(data)) {
+      lastError = new Error("OpenAI response contained no choices.");
+      if (attempt < maxAttempts) {
+        await delay(250 * attempt);
+        continue;
+      }
+      throw lastError;
+    }
+
+    return data;
+  }
+
+  throw lastError || new Error("OpenAI request failed.");
+}
+
 // Minimal OpenAI adapter stub
 // Exports: listModels(config) and generate(config, params)
 module.exports = {
@@ -58,23 +129,8 @@ module.exports = {
         max_tokens: params.max_tokens,
       };
 
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`OpenAI request failed: ${res.status} ${text}`);
-      }
-
-      const data = await res.json();
-      const text =
-        data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.text ?? "";
+      const data = await postOpenAiJson(url, apiKey, body);
+      const text = extractOpenAiText(data);
       return { text, raw: data };
     }
 
@@ -88,25 +144,18 @@ module.exports = {
         max_tokens: params.max_tokens,
       };
 
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`OpenAI request failed: ${res.status} ${text}`);
-      }
-
-      const data = await res.json();
-      const text = data?.choices?.[0]?.text ?? "";
+      const data = await postOpenAiJson(url, apiKey, body);
+      const text = extractOpenAiText(data);
       return { text, raw: data };
     }
 
     throw new Error("No messages or prompt provided to OpenAI adapter.");
+  },
+  __internal: {
+    delay,
+    extractOpenAiText,
+    hasChoices,
+    isRetriableOpenAiFailure,
+    postOpenAiJson,
   },
 };

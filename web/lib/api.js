@@ -1,24 +1,39 @@
 export function getApiBaseUrl() {
   return process.env.NEXT_PUBLIC_API_URL || "http://localhost:55222";
 }
+function detectPlatform() {
+  if (typeof navigator === "undefined") return null;
+  const ua = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  if (/Win/i.test(platform) || /Windows/i.test(ua)) return "Windows";
+  if (/Mac/i.test(platform) || /Macintosh/i.test(ua) || /Mac OS X/i.test(ua))
+    return "macOS";
+  if (/Linux/i.test(platform) || /X11/i.test(ua)) return "Linux";
+  return "Unknown";
+}
 
 export async function apiFetch(url, options = {}) {
   const target = `${getApiBaseUrl()}${url}`;
+  const clientPlatform =
+    typeof navigator !== "undefined" ? detectPlatform() : null;
   const authHeaders = {
     ...(options.token ? { Authorization: `Bearer ${options.token}` } : {}),
-    ...(options.apiKey ? { "X-API-Key": options.apiKey } : {})
+    ...(options.apiKey ? { "X-API-Key": options.apiKey } : {}),
+    ...(clientPlatform ? { "X-Client-Platform": clientPlatform } : {}),
   };
   const response = await fetch(target, {
     method: options.method || "GET",
     headers: options.formData
       ? {
-          ...authHeaders
+          ...authHeaders,
         }
       : {
           "Content-Type": "application/json",
-          ...authHeaders
+          ...authHeaders,
         },
-    body: options.formData || (options.body ? JSON.stringify(options.body) : undefined)
+    body:
+      options.formData ||
+      (options.body ? JSON.stringify(options.body) : undefined),
   });
 
   const payload = await response.json().catch(() => ({}));

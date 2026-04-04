@@ -9,6 +9,8 @@ import {
 import { getApiBaseUrl } from "@/lib/api";
 import { useAppStore } from "@/store/useAppStore";
 import { ChatProfileModal } from "@/components/ChatProfileModal";
+import { MessageMarkdown } from "@/components/MessageMarkdown";
+import { TerminalChatCard } from "@/components/TerminalChatCard";
 import { MessageActionMenu } from "./MessageActionMenu";
 import { MediaPreviewModal } from "./MediaPreviewModal";
 import { EmojiPicker } from "./EmojiPicker";
@@ -46,6 +48,15 @@ function renderStatus(message) {
     : status === "delivered"
       ? "Delivered"
       : "Sent";
+}
+
+function getTerminalMessageId(message) {
+  const externalMessageId = String(message?.externalMessageId || "");
+  if (!externalMessageId.startsWith("terminal:")) {
+    return null;
+  }
+
+  return externalMessageId.slice("terminal:".length) || null;
 }
 
 function previewReply(message) {
@@ -382,6 +393,7 @@ export const ChatWindow = forwardRef(function ChatWindow(
   const [pendingFiles, setPendingFiles] = useState([]);
   const [profileOpen, setProfileOpen] = useState(false);
   const [confirmingScanMap, setConfirmingScanMap] = useState({});
+  const updateMessage = useAppStore((s) => s.updateMessage);
   const composerRef = useRef(null);
   const searchInputRef = useRef(null);
   const messagesViewportRef = useRef(null);
@@ -424,13 +436,20 @@ export const ChatWindow = forwardRef(function ChatWindow(
 
   const forwardTargets = chats.filter((item) => item.id !== chat?.id);
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
+  const submitComposer = async () => {
     if (pendingFiles.length > 0) {
       await handleSendWithFiles();
-    } else if (draft.trim()) {
+      return;
+    }
+
+    if (draft.trim()) {
       await sendDraft();
     }
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    await submitComposer();
   };
 
   const sendDraft = async () => {
@@ -495,24 +514,44 @@ export const ChatWindow = forwardRef(function ChatWindow(
     });
   };
 
+  const releasePendingFilePreviews = (files) => {
+    for (const pendingFile of files || []) {
+      if (pendingFile?.preview) {
+        URL.revokeObjectURL(pendingFile.preview);
+      }
+    }
+  };
+
   const handleSendWithFiles = async () => {
     if (pendingFiles.length === 0) {
       return sendDraft();
     }
 
+    const queuedFiles = [...pendingFiles];
+    const queuedDraft = draft;
+    const queuedReplyTo = replyTo;
+
     setBusy(true);
     setUploading(true);
+    setDraft("");
+    setReplyTo(null);
+    setPendingFiles([]);
+    onTyping(false);
+
     try {
-      for (let i = 0; i < pendingFiles.length; i++) {
-        const pendingFile = pendingFiles[i];
-        const isLastFile = i === pendingFiles.length - 1;
-        const caption = isLastFile ? draft.trim() : "";
+      for (let i = 0; i < queuedFiles.length; i++) {
+        const pendingFile = queuedFiles[i];
+        const isLastFile = i === queuedFiles.length - 1;
+        const caption = isLastFile ? queuedDraft.trim() : "";
 
         await onSendMedia({ file: pendingFile.file, caption });
       }
-      setDraft("");
-      setReplyTo(null);
-      setPendingFiles([]);
+      releasePendingFilePreviews(queuedFiles);
+    } catch (error) {
+      setDraft(queuedDraft);
+      setReplyTo(queuedReplyTo);
+      setPendingFiles(queuedFiles);
+      throw error;
     } finally {
       setBusy(false);
       setUploading(false);
@@ -955,6 +994,7 @@ export const ChatWindow = forwardRef(function ChatWindow(
                 const isCurrentSearchResult =
                   isSearchResult &&
                   searchResults[searchResultIndex] === messageIndexInAll;
+                const terminalMessageId = getTerminalMessageId(message);
 
                 return (
                   <div
@@ -1022,10 +1062,20 @@ export const ChatWindow = forwardRef(function ChatWindow(
                             </button>
                           </div>
                         )}
-                      {message.body ? (
-                        <p className="whitespace-pre-wrap text-sm leading-6 text-white/88">
-                          {message.body}
-                        </p>
+                      {terminalMessageId ? (
+                        <TerminalChatCard
+                          terminalId={terminalMessageId}
+                          fallbackBody={message.body}
+                          onReplaceTerminalId={(nextId) => {
+                            updateMessage({
+                              ...message,
+                              externalMessageId: `terminal:${nextId}`,
+                            });
+                          }}
+                        />
+                      ) : null}
+                      {!terminalMessageId && message.body ? (
+                        <MessageMarkdown content={message.body} />
                       ) : null}
 
                       <div className="mt-3 flex items-center justify-end gap-3 text-[11px] text-white/35">
@@ -1200,7 +1250,7 @@ export const ChatWindow = forwardRef(function ChatWindow(
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   if (!busy && !uploading) {
-                    sendDraft();
+                    void submitComposer();
                   }
                 }
               }}

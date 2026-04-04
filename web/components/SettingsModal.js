@@ -1010,9 +1010,15 @@ export function SettingsModal({
                     <button
                       type="button"
                       className={`rounded-full px-3 py-1 text-sm ${terminalAutoApproveAll ? "bg-emerald-600 text-white" : "bg-white/5 text-white/60"}`}
-                      onClick={() =>
-                        setTerminalAutoApproveAll(!terminalAutoApproveAll)
-                      }
+                      onClick={async () => {
+                        try {
+                          await setTerminalAutoApproveAll(
+                            !terminalAutoApproveAll,
+                          );
+                        } catch (error) {
+                          // ignore UI error toast for now; store state already rolled back
+                        }
+                      }}
                     >
                       {terminalAutoApproveAll ? "Enabled" : "Disabled"}
                     </button>

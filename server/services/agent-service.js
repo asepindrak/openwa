@@ -483,6 +483,314 @@ function tryParseJsonObject(text) {
   }
 }
 
+const APP_LAUNCH_INTENT_RE =
+  /\b(?:buka(?:kan)?|open|jalankan|run|launch|start)\b/i;
+const WINDOWS_APP_COMMANDS = {
+  notepad: 'start "" notepad',
+  calculator: 'start "" calc',
+  calc: 'start "" calc',
+  paint: 'start "" mspaint',
+  explorer: 'start "" explorer',
+  terminal: 'start "" wt',
+  cmd: 'start "" cmd',
+};
+const LOCAL_APP_ALIASES = {
+  notepad: ["notepad", "notepad.exe", "editor teks", "text editor"],
+  calculator: ["calculator", "calc", "kalkulator"],
+  paint: ["paint", "mspaint"],
+  explorer: ["explorer", "file explorer", "folder"],
+  terminal: ["terminal", "windows terminal", "wt"],
+  cmd: ["cmd", "command prompt", "prompt perintah"],
+};
+
+function normalizeClientPlatform(platform) {
+  const value = String(platform || "")
+    .trim()
+    .toLowerCase();
+  if (!value) return hostPlatform;
+  if (value.includes("win")) return "win32";
+  if (value.includes("mac") || value.includes("darwin")) return "darwin";
+  if (value.includes("linux")) return "linux";
+  return value;
+}
+
+function getClientPlatform(ctx = {}) {
+  return normalizeClientPlatform(
+    ctx.clientPlatform ||
+      (ctx.socket &&
+        ctx.socket.handshake &&
+        ctx.socket.handshake.auth &&
+        ctx.socket.handshake.auth.platform) ||
+      hostPlatform,
+  );
+}
+
+function detectLocalAppName(message) {
+  const text = String(message || "").toLowerCase();
+  for (const [appName, aliases] of Object.entries(LOCAL_APP_ALIASES)) {
+    if (aliases.some((alias) => text.includes(alias))) {
+      return appName;
+    }
+  }
+  return null;
+}
+
+function buildLocalAppLaunchCommand(appName, platform) {
+  if (!appName) return null;
+  if (platform === "win32") {
+    return WINDOWS_APP_COMMANDS[appName] || null;
+  }
+  return null;
+}
+
+function resolveDirectAssistantToolCall(userMessage, ctx = {}) {
+  const text = String(userMessage || "").trim();
+  if (!text || !APP_LAUNCH_INTENT_RE.test(text)) return null;
+
+  const platform = getClientPlatform(ctx);
+  const appName = detectLocalAppName(text);
+  const command = buildLocalAppLaunchCommand(appName, platform);
+  if (!command) return null;
+
+  const label =
+    appName === "cmd"
+      ? "Command Prompt"
+      : appName.charAt(0).toUpperCase() + appName.slice(1);
+
+  return {
+    tool: "run_terminal",
+    args: {
+      command,
+      approvalMode: "auto",
+      trustedAuto: true,
+      timeout: 15000,
+    },
+    directSummary: `Saya menjalankan ${label} di ${OS_NAME_MAP[platform] || platform}.`,
+  };
+}
+
+function buildAssistantSystemPrompt({
+  assistantDisplayName,
+  assistantExternalId,
+  assistantPersona,
+  toolsText,
+  openapiText,
+  identityText,
+  clientPlatform,
+}) {
+  const personaText = String(assistantPersona || "").trim();
+  const identitySection = String(identityText || "").trim()
+    ? `\n\nIDENTITY.md:\n${String(identityText || "").trim()}`
+    : "";
+  const platformName = OS_NAME_MAP[clientPlatform] || clientPlatform || hostOS;
+
+  return `${personaText || `You are ${assistantDisplayName}, an OpenWA assistant that executes the correct internal tool instead of replying with generic how-to steps when a supported action is clear.`}\n\nAssistant profile:\n- displayName: ${assistantDisplayName}\n- externalId: ${assistantExternalId}\n- hostOS: ${hostOS}\n- userPlatform: ${platformName}\n\nResponse format rules:\n- When you are not calling a tool, write in concise GitHub-flavored Markdown.\n- Use short paragraphs by default.\n- Use flat bullet or numbered lists only when the content is naturally list-shaped.\n- Use fenced code blocks for commands, JSON, or multi-line snippets.\n- Use inline code for commands, paths, env vars, and identifiers.\n- Do not wrap normal prose in code fences.\n- Do not output Markdown code fences when you are returning a tool-call JSON object; return raw JSON only.\n\nYou can perform configuration actions and call tools when requested. Available tools: ${Object.keys(
+    tools,
+  )}.\n\nFor supported local app launch requests on the user's device, prefer calling run_terminal with the correct OS command instead of describing manual steps. When a user message contains an attachment marker or image content, treat the file as already attached in the current chat. Do not ask the user to upload the file again unless the attachment is explicitly missing or corrupted.${identitySection}\n\nTOOLS.md:\n${toolsText}\n\nOpenAPI doc (JSON):\n${openapiText}\n\nWhen you want to execute a tool, respond with a JSON object only, for example: {"tool":"add_device","args":{"name":"Sales","phoneNumber":"12345"}}. Otherwise respond with a plain text message for the user.`;
+}
+
+function normalizeAssistantInput(input) {
+  if (typeof input === "string") {
+    return {
+      body: input,
+      type: "text",
+      mediaFileId: null,
+      replyToId: null,
+    };
+  }
+
+  const payload = input && typeof input === "object" ? input : {};
+  return {
+    body: String(payload.body || ""),
+    type: payload.type || (payload.mediaFileId ? "document" : "text"),
+    mediaFileId: payload.mediaFileId || null,
+    replyToId: payload.replyToId || null,
+  };
+}
+
+async function loadAssistantMediaFile(userId, mediaFileId) {
+  if (!mediaFileId) return null;
+  return prisma.mediaFile.findFirst({
+    where: {
+      id: mediaFileId,
+      userId,
+    },
+  });
+}
+
+function buildMessageContentForLLM(message) {
+  const body = String(message?.body || "").trim();
+  const mediaFile = message?.mediaFile || null;
+  if (!mediaFile) return body;
+
+  const attachmentText = `[attachment already uploaded: ${mediaFile.originalName || "file"}; mimeType: ${mediaFile.mimeType || "unknown"}; relativePath: ${mediaFile.relativePath || "unknown"}]`;
+  return body ? `${body}\n${attachmentText}` : attachmentText;
+}
+
+function isImageMediaFile(mediaFile) {
+  return Boolean(
+    mediaFile &&
+    String(mediaFile.mimeType || "")
+      .toLowerCase()
+      .startsWith("image/"),
+  );
+}
+
+function isVisionCapableProvider(providerName) {
+  const normalized = String(providerName || "").toLowerCase();
+  return normalized === "openai" || normalized === "openrouter";
+}
+
+function resolveMediaFilePath(mediaFile) {
+  const relativePath = String(mediaFile?.relativePath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .trim();
+  if (!relativePath) return null;
+  const normalized = relativePath.startsWith("media/")
+    ? relativePath.slice("media/".length)
+    : relativePath;
+  return path.join(mediaDir, normalized);
+}
+
+function buildAssistantAttachmentInstruction(body, mediaFile) {
+  const attachmentText = buildMessageContentForLLM({ body, mediaFile });
+  return body
+    ? `User attached a file to this message. The file is already uploaded in the current chat and does not need to be re-uploaded. Caption or question: ${body}\n${attachmentText}`
+    : `User attached a file to this message. The file is already uploaded in the current chat and does not need to be re-uploaded. ${attachmentText}`;
+}
+
+function buildVisionUserContent(body, mediaFile) {
+  const filePath = resolveMediaFilePath(mediaFile);
+  if (!filePath || !fs.existsSync(filePath)) {
+    return buildAssistantAttachmentInstruction(body, mediaFile);
+  }
+
+  const maxInlineBytes = 5 * 1024 * 1024;
+  if (mediaFile?.size && Number(mediaFile.size) > maxInlineBytes) {
+    return buildAssistantAttachmentInstruction(body, mediaFile);
+  }
+
+  const base64 = fs.readFileSync(filePath).toString("base64");
+  const blocks = [];
+  const instruction = body
+    ? `User attached this image and asked: ${body}. Analyze the attached image directly.`
+    : "User attached this image. Analyze the attached image directly.";
+
+  blocks.push({ type: "text", text: instruction });
+  blocks.push({
+    type: "image_url",
+    image_url: {
+      url: `data:${mediaFile.mimeType || "image/png"};base64,${base64}`,
+    },
+  });
+
+  return blocks;
+}
+
+function buildLlmUserContent({ body, mediaFile, providerName }) {
+  if (!mediaFile) {
+    return String(body || "").trim();
+  }
+
+  if (isImageMediaFile(mediaFile) && isVisionCapableProvider(providerName)) {
+    return buildVisionUserContent(body, mediaFile);
+  }
+
+  return buildAssistantAttachmentInstruction(body, mediaFile);
+}
+
+function buildUserRequestSummaryText({ body, mediaFile }) {
+  return (
+    buildAssistantAttachmentInstruction(body, mediaFile) ||
+    String(body || "").trim() ||
+    "User sent an attachment."
+  );
+}
+
+function formatLlmErrorForUser(error) {
+  const message = String(error?.message || error || "");
+  if (!message) {
+    return "Model AI sedang bermasalah. Coba kirim lagi beberapa saat lagi.";
+  }
+
+  if (
+    /openai request failed|response contained no choices|server_error|llm generate failed/i.test(
+      message,
+    )
+  ) {
+    return "Model AI dari provider sedang bermasalah sementara. Pesan Anda sudah diterima, silakan coba lagi beberapa saat lagi.";
+  }
+
+  return `Model AI gagal memproses permintaan saat ini. ${message}`;
+}
+
+function buildToolResultFallbackText(toolName, toolResult) {
+  if (toolName === "run_terminal" && toolResult?.executed) {
+    return "Perintah berhasil dijalankan.";
+  }
+
+  if (toolResult?.ok === true) {
+    return `Tool ${toolName} berhasil dijalankan.`;
+  }
+
+  return `Tool ${toolName} executed. Result: ${JSON.stringify(toolResult)}`;
+}
+
+async function storeAssistantTerminalMessage({
+  userId,
+  chatId,
+  assistantSender,
+  assistantDisplayName,
+  command,
+  terminalId,
+  executed,
+  io,
+}) {
+  const body = executed
+    ? `Terminal command finished: ${command}`
+    : `Terminal command pending approval: ${command}`;
+
+  const assistantMsg = chatId
+    ? await chatService.storeIncomingMessageInChat({
+        userId,
+        chatId,
+        sender: assistantSender,
+        body,
+        externalMessageId: `terminal:${terminalId}`,
+      })
+    : await chatService.storeIncomingMessage({
+        userId,
+        sessionId: null,
+        sender: assistantSender,
+        displayName: assistantDisplayName,
+        body,
+        externalMessageId: `terminal:${terminalId}`,
+      });
+
+  try {
+    io && io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
+    io &&
+      io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
+  } catch (e) {
+    // ignore emit errors
+  }
+}
+
+function getTerminalCommandForTool(toolName, args, toolResult) {
+  if (!toolResult?.id) return null;
+
+  if (toolName === "run_terminal") {
+    return String(args?.command || toolResult?.command || "").trim() || null;
+  }
+
+  if (toolName === "run_copilot") {
+    return String(toolResult?.command || "").trim() || null;
+  }
+
+  return null;
+}
+
 const tools = {
   add_device: async (userId, args, ctx) => {
     const name = String(args.name || "").trim();
@@ -546,7 +854,7 @@ const tools = {
     return { ok: true, webhook: cfg };
   },
   run_terminal: async (userId, args, ctx) => {
-    const { command, approvalMode, timeout = 300000 } = args || {};
+    const { command, approvalMode, timeout = 300000, trustedAuto } = args || {};
     if (!command) throw new Error("command is required");
 
     // If the user has enabled auto-approve in settings, prefer auto when
@@ -566,7 +874,13 @@ const tools = {
     // Pass socket/io so terminal-service can emit request/result events
     const res = await terminalService.requestExecution(
       userId,
-      { command, approvalMode: effectiveApprovalMode, timeout },
+      {
+        command,
+        approvalMode: effectiveApprovalMode,
+        timeout,
+        trustedAuto: !!trustedAuto,
+        chatId: ctx?.chatId || null,
+      },
       ctx && ctx.io,
     );
     return res;
@@ -579,30 +893,18 @@ const tools = {
     const timeout = Number(args.timeout) || 300000;
 
     try {
-      if (typeof terminalService.runShellCommand === "function") {
-        const res = await terminalService.runShellCommand(command, timeout);
-        return {
-          ok: true,
-          command,
-          result: {
-            stdout: res.stdout,
-            stderr: res.stderr,
-            exitCode: res.code,
-          },
-        };
-      }
-
-      // Fallback: request execution via terminal-service (may require allowlist)
       const execRes = await terminalService.requestExecution(
         userId,
-        { command, approvalMode: "auto", timeout },
+        { command, approvalMode: "auto", timeout, chatId: ctx?.chatId || null },
         ctx && ctx.io,
       );
-      if (execRes && execRes.executed) {
-        return { ok: true, command, result: execRes.result };
-      }
-
-      return { ok: true, command, executed: false, id: execRes.id };
+      return {
+        ok: true,
+        command,
+        id: execRes?.id,
+        executed: !!execRes?.executed,
+        result: execRes?.result,
+      };
     } catch (err) {
       throw new Error(`copilot execution failed: ${err.message}`);
     }
@@ -885,14 +1187,36 @@ async function invokeRegisteredTool(userId, toolId, options = {}, ctx = {}) {
   };
 }
 
-async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
+async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
   const { config, io, socket, sessionManager } = ctx || {};
+  const assistantInput = normalizeAssistantInput(input);
+  const mediaFile = await loadAssistantMediaFile(
+    userId,
+    assistantInput.mediaFileId,
+  );
+  const llmUserMessage = buildMessageContentForLLM({
+    body: assistantInput.body,
+    mediaFile,
+  });
+
   // store user's outgoing message (so it appears in conversation)
   const userResult = await chatService.createOutgoingMessage({
     userId,
     chatId,
-    body: userMessage,
+    body: assistantInput.body,
+    type: assistantInput.type,
+    mediaFileId: assistantInput.mediaFileId,
+    replyToId: assistantInput.replyToId,
   });
+  const assistantSender =
+    (userResult && userResult.message && userResult.message.receiver) ||
+    "openwa:assistant";
+  const assistantDisplayName =
+    (userResult &&
+      userResult.chat &&
+      userResult.chat.contact &&
+      userResult.chat.contact.displayName) ||
+    "OpenWA Assistant";
   try {
     io.to(`user:${userId}`).emit("new_message", userResult.message);
     io.to(`user:${userId}`).emit("contact_list_update", userResult.chat);
@@ -900,27 +1224,50 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
     // ignore emit errors
   }
 
-  // Prepare context for LLM
-  const providerId = await chooseProviderId(userId);
-  if (!providerId) {
-    // ask user to configure provider via assistant
-    const help =
-      "No AI provider configured. Please add an LLM provider in Settings or ask me to add one.";
-    const assistantMsg = await chatService.storeIncomingMessage({
-      userId,
-      sessionId: null,
-      sender: "openwa:assistant",
-      displayName: "OpenWA Assistant",
-      body: help,
-    });
-    // emit updates
-    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
-    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
-    return;
+  let chatSummary = null;
+  if (chatId) {
+    try {
+      chatSummary = await chatService.getChatWithContact(userId, chatId);
+    } catch (e) {
+      chatSummary = null;
+    }
+  }
+
+  const directToolCall = resolveDirectAssistantToolCall(
+    assistantInput.body,
+    ctx,
+  );
+
+  // Prepare context for LLM only when needed.
+  let providerId = null;
+  let providerName = null;
+  if (!directToolCall) {
+    providerId = await chooseProviderId(userId);
+    if (!providerId) {
+      const help =
+        "No AI provider configured. Please add an LLM provider in Settings or ask me to add one.";
+      const assistantMsg = await chatService.storeIncomingMessage({
+        userId,
+        sessionId: null,
+        sender: assistantSender,
+        displayName: assistantDisplayName,
+        body: help,
+      });
+      io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
+      io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
+      return;
+    }
+
+    try {
+      const provider = await aiProviderService.getProvider(userId, providerId);
+      providerName = provider?.provider || null;
+    } catch (e) {
+      providerName = null;
+    }
   }
 
   const toolsText = await readToolsFile();
-  // include openapi brief
+  const identityText = await readIdentityFile();
   let openapiText = "";
   try {
     const openapiModule = require("../express/openapi");
@@ -930,28 +1277,95 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
     openapiText = "";
   }
 
-  const systemPrompt = `You are the OpenWA Assistant. You can perform configuration actions and call tools when requested. Available tools: ${Object.keys(
-    tools,
-  )}.\n\nTOOLS.md:\n${toolsText}\n\nOpenAPI doc (JSON):\n${openapiText}\n\nWhen you want to execute a tool, respond with a JSON object only, for example: {"tool":"add_device","args":{"name":"Sales","phoneNumber":"12345"}}. Otherwise respond with a plain text message for the user.`;
+  const clientPlatform = getClientPlatform(ctx);
+  const systemPrompt = buildAssistantSystemPrompt({
+    assistantDisplayName,
+    assistantExternalId:
+      (chatSummary && chatSummary.contact && chatSummary.contact.externalId) ||
+      assistantSender,
+    assistantPersona:
+      chatSummary && chatSummary.contact ? chatSummary.contact.persona : null,
+    toolsText,
+    openapiText,
+    identityText,
+    clientPlatform,
+  });
+
+  if (directToolCall) {
+    let toolResult;
+    try {
+      toolResult = await tools[directToolCall.tool](
+        userId,
+        directToolCall.args,
+        ctx,
+      );
+    } catch (err) {
+      const assistErr = `Tool error: ${err.message}`;
+      const assistantMsg = await chatService.storeIncomingMessage({
+        userId,
+        sessionId: null,
+        sender: assistantSender,
+        displayName: assistantDisplayName,
+        body: assistErr,
+      });
+      io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
+      io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
+      return;
+    }
+
+    const terminalCommand = getTerminalCommandForTool(
+      directToolCall.tool,
+      directToolCall.args,
+      toolResult,
+    );
+
+    if (terminalCommand && toolResult?.id) {
+      await storeAssistantTerminalMessage({
+        userId,
+        chatId,
+        assistantSender,
+        assistantDisplayName,
+        command: terminalCommand,
+        terminalId: toolResult.id,
+        executed: !!toolResult.executed,
+        io,
+      });
+      return;
+    }
+
+    const finalText =
+      toolResult && toolResult.executed
+        ? directToolCall.directSummary
+        : `Saya menyiapkan permintaan menjalankan aplikasi lokal. Request id: ${toolResult.id}`;
+
+    const assistantMsg = await chatService.storeIncomingMessage({
+      userId,
+      sessionId: null,
+      sender: assistantSender,
+      displayName: assistantDisplayName,
+      body: finalText,
+    });
+    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
+    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
+    return;
+  }
 
   // First LLM call: include chat context when available
   let llmResp;
   try {
     const messagesForLLM = [{ role: "system", content: systemPrompt }];
 
-    let chatSummary = null;
-    if (chatId) {
-      try {
-        chatSummary = await chatService.getChatWithContact(userId, chatId);
-      } catch (e) {
-        chatSummary = null;
-      }
+    if (clientPlatform) {
+      messagesForLLM.push({
+        role: "system",
+        content: `User device platform: ${clientPlatform}. When providing instructions to open local applications or run OS-specific steps, prefer commands and UI flows for ${clientPlatform}.`,
+      });
     }
 
     if (chatSummary) {
       messagesForLLM.push({
         role: "system",
-        content: `Active chat with ${chatSummary.contact.displayName} (externalId: ${chatSummary.contact.externalId}). Include recent messages as context.`,
+        content: `Active chat with ${chatSummary.contact.displayName} (externalId: ${chatSummary.contact.externalId}). Persona: ${chatSummary.contact.persona || "not set"}. Include recent messages as context.`,
       });
 
       try {
@@ -961,9 +1375,7 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
         const recent = hist.messages || [];
         for (const m of recent) {
           const role = m.direction === "outbound" ? "user" : "assistant";
-          const content =
-            m.body ||
-            (m.mediaFile ? `[attachment: ${m.mediaFile.originalName}]` : "");
+          const content = buildMessageContentForLLM(m);
           messagesForLLM.push({ role, content });
         }
       } catch (e) {
@@ -971,19 +1383,32 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
       }
     }
 
-    messagesForLLM.push({ role: "user", content: userMessage });
+    const currentUserContent = buildLlmUserContent({
+      body: assistantInput.body,
+      mediaFile,
+      providerName,
+    });
+
+    messagesForLLM.push({
+      role: "user",
+      content:
+        currentUserContent ||
+        llmUserMessage ||
+        assistantInput.body ||
+        "User sent an empty message.",
+    });
 
     llmResp = await llmService.generate(userId, {
       providerId,
       messages: messagesForLLM,
     });
   } catch (err) {
-    const fail = `LLM error: ${err.message}`;
+    const fail = formatLlmErrorForUser(err);
     const assistantMsg = await chatService.storeIncomingMessage({
       userId,
       sessionId: null,
-      sender: "openwa:assistant",
-      displayName: "OpenWA Assistant",
+      sender: assistantSender,
+      displayName: assistantDisplayName,
       body: fail,
     });
     io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
@@ -991,7 +1416,20 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
     return;
   }
 
-  const text = llmResp?.text || "";
+  const text = String(llmResp?.text || "").trim();
+
+  if (!text) {
+    const assistantMsg = await chatService.storeIncomingMessage({
+      userId,
+      sessionId: null,
+      sender: assistantSender,
+      displayName: assistantDisplayName,
+      body: "Model AI tidak mengembalikan isi respons. Silakan coba lagi.",
+    });
+    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
+    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
+    return;
+  }
 
   const maybe = tryParseJsonObject(text);
   if (!maybe || !maybe.tool) {
@@ -999,8 +1437,8 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
     const assistantMsg = await chatService.storeIncomingMessage({
       userId,
       sessionId: null,
-      sender: "openwa:assistant",
-      displayName: "OpenWA Assistant",
+      sender: assistantSender,
+      displayName: assistantDisplayName,
       body: text,
     });
     io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
@@ -1016,8 +1454,8 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
     const assistantMsg = await chatService.storeIncomingMessage({
       userId,
       sessionId: null,
-      sender: "openwa:assistant",
-      displayName: "OpenWA Assistant",
+      sender: assistantSender,
+      displayName: assistantDisplayName,
       body: errMsg,
     });
     io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
@@ -1034,8 +1472,8 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
     const assistantMsg = await chatService.storeIncomingMessage({
       userId,
       sessionId: null,
-      sender: "openwa:assistant",
-      displayName: "OpenWA Assistant",
+      sender: assistantSender,
+      displayName: assistantDisplayName,
       body: assistErr,
     });
     io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
@@ -1043,14 +1481,32 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
     return;
   }
 
+  const terminalCommand = getTerminalCommandForTool(toolName, args, toolResult);
+  if (terminalCommand && toolResult?.id) {
+    await storeAssistantTerminalMessage({
+      userId,
+      chatId,
+      assistantSender,
+      assistantDisplayName,
+      command: terminalCommand,
+      terminalId: toolResult.id,
+      executed: !!toolResult.executed,
+      io,
+    });
+    return;
+  }
+
   // Let LLM summarize the tool result for the user
-  let finalText = `Tool ${toolName} executed. Result: ${JSON.stringify(toolResult)}`;
+  let finalText = buildToolResultFallbackText(toolName, toolResult);
   try {
     const summaryResp = await llmService.generate(userId, {
       providerId,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `User requested: ${userMessage}` },
+        {
+          role: "user",
+          content: `User requested: ${buildUserRequestSummaryText({ body: assistantInput.body, mediaFile })}`,
+        },
         {
           role: "assistant",
           content: `Tool ${toolName} returned: ${JSON.stringify(toolResult)}`,
@@ -1073,8 +1529,8 @@ async function handleAssistantMessage(userId, chatId, userMessage, ctx = {}) {
   const assistantMsg = await chatService.storeIncomingMessage({
     userId,
     sessionId: null,
-    sender: "openwa:assistant",
-    displayName: "OpenWA Assistant",
+    sender: assistantSender,
+    displayName: assistantDisplayName,
     body: finalText,
   });
   io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
@@ -1088,4 +1544,21 @@ module.exports = {
   registerExternalTool,
   fetchAndRegisterTool,
   invokeRegisteredTool,
+  __internal: {
+    buildAssistantSystemPrompt,
+    buildAssistantAttachmentInstruction,
+    buildLlmUserContent,
+    buildMessageContentForLLM,
+    buildToolResultFallbackText,
+    buildUserRequestSummaryText,
+    buildVisionUserContent,
+    formatLlmErrorForUser,
+    getTerminalCommandForTool,
+    isImageMediaFile,
+    isVisionCapableProvider,
+    normalizeAssistantInput,
+    resolveMediaFilePath,
+    resolveDirectAssistantToolCall,
+    getClientPlatform,
+  },
 };

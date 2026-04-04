@@ -111,12 +111,12 @@ export function ContactList({
                 label={assistantChat.contact.displayName}
               />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="truncate font-medium text-white">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3">
+                  <h3 className="min-w-0 truncate font-medium text-white">
                     {assistantChat.contact.displayName}
                   </h3>
-                  <div className="flex items-center gap-2">
-                    <span className="shrink-0 text-[11px] text-white/35">
+                  <div className="w-[62px] shrink-0 text-right">
+                    <span className="block truncate text-[11px] text-white/35">
                       {/* show last message time if any */}
                       {assistantChat.contact.lastMessageAt ||
                       assistantChat.updatedAt
@@ -132,14 +132,13 @@ export function ContactList({
                         : ""}
                     </span>
                   </div>
-                </div>
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="truncate text-sm text-white/42">
+                  <p className="mt-1 min-w-0 truncate text-sm text-white/42">
                     {assistantChat.contact.persona
                       ? assistantChat.contact.persona
                       : assistantChat.contact.lastMessagePreview ||
                         "No messages yet"}
                   </p>
+                  <div className="mt-1 w-[62px] shrink-0" />
                 </div>
               </div>
             </button>
@@ -160,11 +159,11 @@ export function ContactList({
                 label={chat.contact.displayName}
               />
               <div className="min-w-0 flex-1">
-                <div className="flex items-center justify-between gap-3">
-                  <h3 className="truncate font-medium text-white">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3">
+                  <h3 className="min-w-0 truncate font-medium text-white">
                     {chat.contact.displayName}
                   </h3>
-                  <div className="flex items-center gap-2">
+                  <div className="flex w-[76px] shrink-0 items-center justify-end gap-2">
                     <button
                       type="button"
                       onClick={(e) => {
@@ -177,20 +176,20 @@ export function ContactList({
                     >
                       {chat.pinnedAt ? "📌" : "📍"}
                     </button>
-                    <span className="shrink-0 text-[11px] text-white/35">
+                    <span className="block min-w-0 truncate text-[11px] text-white/35">
                       {formatTime(chat.contact.lastMessageAt || chat.updatedAt)}
                     </span>
                   </div>
-                </div>
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <p className="truncate text-sm text-white/42">
+                  <p className="mt-1 min-w-0 truncate text-sm text-white/42">
                     {chat.contact.lastMessagePreview || "No messages yet"}
                   </p>
-                  {chat.contact.unreadCount ? (
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-500 px-1.5 text-[11px] font-bold text-[#10251a]">
-                      {chat.contact.unreadCount}
-                    </span>
-                  ) : null}
+                  <div className="mt-1 flex w-[76px] shrink-0 justify-end">
+                    {chat.contact.unreadCount ? (
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-500 px-1.5 text-[11px] font-bold text-[#10251a]">
+                        {chat.contact.unreadCount}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             </button>

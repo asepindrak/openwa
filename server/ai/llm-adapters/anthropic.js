@@ -1,3 +1,61 @@
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hasAnthropicText(data) {
+  return Boolean(data?.completion || data?.output);
+}
+
+function isRetriableAnthropicFailure(status, bodyText, data) {
+  if (status >= 500) return true;
+  if (data && !hasAnthropicText(data)) return true;
+  return /overloaded|server_error|no completion|empty/i.test(
+    String(bodyText || ""),
+  );
+}
+
+async function postAnthropicJson(url, apiKey, body, maxAttempts = 2) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      lastError = new Error(`Anthropic request failed: ${res.status} ${text}`);
+      if (
+        attempt < maxAttempts &&
+        isRetriableAnthropicFailure(res.status, text)
+      ) {
+        await delay(250 * attempt);
+        continue;
+      }
+      throw lastError;
+    }
+
+    const data = await res.json();
+    if (!hasAnthropicText(data)) {
+      lastError = new Error("Anthropic response contained no completion.");
+      if (attempt < maxAttempts) {
+        await delay(250 * attempt);
+        continue;
+      }
+      throw lastError;
+    }
+
+    return data;
+  }
+
+  throw lastError || new Error("Anthropic request failed.");
+}
+
 // Minimal Anthropic adapter stub
 module.exports = {
   listModels: async function (config = {}) {
@@ -73,22 +131,14 @@ module.exports = {
       temperature: params.temperature ?? 0.0,
     };
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Anthropic request failed: ${res.status} ${text}`);
-    }
-
-    const data = await res.json();
+    const data = await postAnthropicJson(url, apiKey, body);
     const text = data?.completion ?? data?.output ?? "";
     return { text, raw: data };
+  },
+  __internal: {
+    delay,
+    hasAnthropicText,
+    isRetriableAnthropicFailure,
+    postAnthropicJson,
   },
 };

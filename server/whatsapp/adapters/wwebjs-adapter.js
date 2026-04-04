@@ -1,5 +1,6 @@
 const EventEmitter = require("events");
 const QRCode = require("qrcode");
+const fs = require("fs");
 const path = require("path");
 const {
   sessionsDir,
@@ -7,6 +8,23 @@ const {
   mediaDir,
   ensureRuntimeDirs,
 } = require("../../utils/paths");
+
+function resolveStoredMediaPath(relativePath) {
+  const normalized = String(relativePath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .trim();
+
+  if (!normalized) {
+    throw new Error("Media path is required.");
+  }
+
+  const withoutMediaPrefix = normalized.startsWith("media/")
+    ? normalized.slice("media/".length)
+    : normalized;
+
+  return path.join(mediaDir, withoutMediaPrefix);
+}
 
 class WwebjsAdapter extends EventEmitter {
   constructor({ session }) {
@@ -172,7 +190,6 @@ class WwebjsAdapter extends EventEmitter {
       });
     });
 
-    const fs = require("fs");
     const { v4: uuidv4 } = require("uuid");
     const { storeIncomingMessage } = require("../../services/chat-service");
     const { prisma } = require("../../database/client");
@@ -328,7 +345,11 @@ class WwebjsAdapter extends EventEmitter {
 
     if (payload.mediaFileId) {
       const { MessageMedia } = require("whatsapp-web.js");
-      const mediaPath = path.join(mediaDir, payload.mediaPath || "");
+      const mediaPath = resolveStoredMediaPath(payload.mediaPath || "");
+
+      if (!fs.existsSync(mediaPath)) {
+        throw new Error(`Media file not found: ${mediaPath}`);
+      }
 
       const media = MessageMedia.fromFilePath(mediaPath);
       const response = await this.client.sendMessage(
@@ -351,4 +372,9 @@ class WwebjsAdapter extends EventEmitter {
   }
 }
 
-module.exports = { WwebjsAdapter };
+module.exports = {
+  WwebjsAdapter,
+  __internal: {
+    resolveStoredMediaPath,
+  },
+};

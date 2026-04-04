@@ -27,6 +27,7 @@ export default function DashboardPage() {
     addMessage,
     updateMessageStatus,
     updateMessage,
+    upsertTerminalRecord,
     setSocket,
     socket,
     chats,
@@ -226,7 +227,65 @@ export default function DashboardPage() {
       useAppStore.getState().setTyping(payload);
     });
 
+    const refreshTerminalRecord = async (payload) => {
+      if (!payload?.id) return;
+      const ensureTerminalCardMessage = (record) => {
+        const targetChatId = record?.chatId || payload?.chatId || null;
+        if (!targetChatId) return;
+
+        const state = useAppStore.getState();
+        const existing = (state.messagesByChat[targetChatId] || []).find(
+          (message) =>
+            message.externalMessageId === `terminal:${record.id}` ||
+            message.id === `terminal:${record.id}`,
+        );
+
+        if (existing) return;
+
+        const chat = state.chats.find((item) => item.id === targetChatId);
+        state.addMessage({
+          id: `terminal:${record.id}`,
+          chatId: targetChatId,
+          sessionId: chat?.sessionId || null,
+          mediaFileId: null,
+          replyToId: null,
+          externalMessageId: `terminal:${record.id}`,
+          sender: chat?.contact?.externalId || "openwa:assistant",
+          receiver: state.user?.id ? `user:${state.user.id}` : "user",
+          body:
+            record.status === "pending"
+              ? `Terminal command pending approval: ${record.command || "Terminal command"}`
+              : `Terminal command finished: ${record.command || "Terminal command"}`,
+          type: "text",
+          direction: "inbound",
+          createdAt: record.requestedAt || new Date().toISOString(),
+          updatedAt: record.requestedAt || new Date().toISOString(),
+          mediaFile: null,
+          replyTo: null,
+          statuses: [{ status: "delivered" }],
+        });
+      };
+
+      try {
+        const data = await apiFetch(`/api/terminal/${payload.id}`, { token });
+        if (data?.item) {
+          upsertTerminalRecord(data.item);
+          ensureTerminalCardMessage(data.item);
+        }
+      } catch (error) {
+        if (payload?.id) {
+          upsertTerminalRecord(payload);
+          ensureTerminalCardMessage(payload);
+        }
+      }
+    };
+
+    socketClient.on("terminal_request", refreshTerminalRecord);
+    socketClient.on("terminal_result", refreshTerminalRecord);
+
     return () => {
+      socketClient.off("terminal_request", refreshTerminalRecord);
+      socketClient.off("terminal_result", refreshTerminalRecord);
       socketClient.close();
       setSocket(null);
     };
@@ -237,6 +296,7 @@ export default function DashboardPage() {
     setSocket,
     token,
     updateMessageStatus,
+    upsertTerminalRecord,
     upsertChat,
     upsertSession,
   ]);

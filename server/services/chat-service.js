@@ -781,6 +781,79 @@ async function createIncomingMessageWithRetry(data) {
   return retryOnSqliteTimeout(() => prisma.message.create(data));
 }
 
+async function storeIncomingMessageInChat({
+  userId,
+  chatId,
+  sender,
+  body,
+  type = "text",
+  mediaFileId = null,
+  externalMessageId = null,
+}) {
+  const chat = await retryOnSqliteTimeout(() =>
+    prisma.chat.findFirst({
+      where: { id: chatId, userId },
+      include: { contact: true },
+    }),
+  );
+
+  if (!chat) {
+    throw new Error("Chat not found.");
+  }
+
+  const dataObj = {
+    chatId: chat.id,
+    sessionId: chat.sessionId,
+    sender,
+    receiver: `user:${userId}`,
+    body,
+    type,
+    direction: "inbound",
+    statuses: {
+      create: [{ status: "delivered" }],
+    },
+  };
+
+  if (mediaFileId) {
+    dataObj.mediaFileId = mediaFileId;
+  }
+
+  if (externalMessageId) {
+    dataObj.externalMessageId = externalMessageId;
+  }
+
+  const message = await createIncomingMessageWithRetry({
+    data: dataObj,
+    include: {
+      statuses: {
+        orderBy: { createdAt: "asc" },
+      },
+      mediaFile: true,
+      replyTo: {
+        include: {
+          mediaFile: true,
+        },
+      },
+    },
+  });
+
+  await retryOnSqliteTimeout(() =>
+    prisma.chat.update({
+      where: { id: chat.id },
+      data: { updatedAt: new Date() },
+    }),
+  );
+
+  await retryOnSqliteTimeout(() =>
+    touchContactPreview(chat.contactId, sanitizedPreview(body, type), 1),
+  );
+
+  return {
+    chat: await loadChatSummary(chat.id),
+    message: mapMessage(message),
+  };
+}
+
 async function listContacts(userId, sessionId, search) {
   const normalizedSearch = String(search || "").trim();
   const contacts = await retryOnSqliteTimeout(() =>
@@ -955,6 +1028,7 @@ async function storeIncomingMessage({
   body,
   type = "text",
   mediaFileId = null,
+  externalMessageId = null,
 }) {
   return enqueueIncomingMessage(async () => {
     const chat = await ensureChatForIncoming({
@@ -965,53 +1039,15 @@ async function storeIncomingMessage({
       avatarUrl,
     });
 
-    const dataObj = {
+    return storeIncomingMessageInChat({
+      userId,
       chatId: chat.id,
-      sessionId,
       sender,
-      receiver: `user:${userId}`,
       body,
       type,
-      direction: "inbound",
-      statuses: {
-        create: [{ status: "delivered" }],
-      },
-    };
-
-    if (mediaFileId) {
-      dataObj.mediaFileId = mediaFileId;
-    }
-
-    const message = await createIncomingMessageWithRetry({
-      data: dataObj,
-      include: {
-        statuses: {
-          orderBy: { createdAt: "asc" },
-        },
-        mediaFile: true,
-        replyTo: {
-          include: {
-            mediaFile: true,
-          },
-        },
-      },
+      mediaFileId,
+      externalMessageId,
     });
-
-    await retryOnSqliteTimeout(() =>
-      prisma.chat.update({
-        where: { id: chat.id },
-        data: { updatedAt: new Date() },
-      }),
-    );
-
-    await retryOnSqliteTimeout(() =>
-      touchContactPreview(chat.contactId, sanitizedPreview(body, type), 1),
-    );
-
-    return {
-      chat: await loadChatSummary(chat.id),
-      message: mapMessage(message),
-    };
   });
 }
 
@@ -1183,6 +1219,46 @@ async function forwardMessage(userId, messageId, targetChatId) {
   });
 }
 
+async function updateContact(
+  userId,
+  contactId,
+  { displayName, avatarUrl, persona } = {},
+) {
+  const existing = await retryOnSqliteTimeout(() =>
+    prisma.contact.findFirst({ where: { id: contactId, userId } }),
+  );
+
+  if (!existing) {
+    throw new Error("Contact not found.");
+  }
+
+  const data = {};
+  if (displayName !== undefined)
+    data.displayName = String(displayName).trim() || existing.displayName;
+  if (avatarUrl !== undefined) data.avatarUrl = avatarUrl || null;
+  if (persona !== undefined) data.persona = persona || null;
+
+  const updated = await retryOnSqliteTimeout(() =>
+    prisma.contact.update({ where: { id: contactId }, data }),
+  );
+
+  const chat = await retryOnSqliteTimeout(() =>
+    prisma.chat.findFirst({ where: { userId, contactId } }),
+  );
+
+  if (chat) {
+    await retryOnSqliteTimeout(() =>
+      prisma.chat.update({
+        where: { id: chat.id },
+        data: { title: updated.displayName },
+      }),
+    );
+    return loadChatSummary(chat.id);
+  }
+
+  return { id: null, contact: updated };
+}
+
 module.exports = {
   addMessageStatus,
   createMediaFile,
@@ -1199,7 +1275,9 @@ module.exports = {
   openChatForContact,
   syncWhatsappSnapshot,
   storeIncomingMessage,
+  storeIncomingMessageInChat,
   pinChat,
   unpinChat,
+  updateContact,
   getChatWithContact,
 };

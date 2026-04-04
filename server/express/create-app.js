@@ -86,7 +86,7 @@ function createApp({ config, sessionManager }) {
     res.header("Access-Control-Allow-Credentials", "true");
     res.header(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-API-Key, X-OpenWA-API-Key",
+      "Content-Type, Authorization, X-API-Key, X-OpenWA-API-Key, X-Client-Platform",
     );
     res.header(
       "Access-Control-Allow-Methods",
@@ -618,6 +618,8 @@ function createApp({ config, sessionManager }) {
         settings = {};
       }
 
+      const clientPlatform = req.headers["x-client-platform"] || null;
+
       res.json({
         user: req.user,
         sessions,
@@ -627,6 +629,7 @@ function createApp({ config, sessionManager }) {
         hasMoreMessages: messageResult.hasMore,
         nextBefore: messageResult.nextBefore,
         settings,
+        clientPlatform,
       });
     } catch (error) {
       res.status(error?.code === "P1008" ? 503 : 500).json({
@@ -936,6 +939,24 @@ function createApp({ config, sessionManager }) {
     }
   });
 
+  app.put(
+    "/api/contacts/:contactId",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const { displayName, avatarUrl, persona } = req.body || {};
+      const chat = await chatService.updateContact(
+        req.user.id,
+        req.params.contactId,
+        {
+          displayName,
+          avatarUrl,
+          persona,
+        },
+      );
+      res.json({ chat });
+    }),
+  );
+
   app.get("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
     try {
       const result = await chatService.listMessages(
@@ -963,6 +984,43 @@ function createApp({ config, sessionManager }) {
     requireAuth,
     async (req, res) => {
       try {
+        // If this chat targets an assistant instance, delegate to agent-service
+        try {
+          const targetChat = await chatService.getChatWithContact(
+            req.user.id,
+            req.params.chatId,
+          );
+          const externalId = targetChat?.contact?.externalId || null;
+          if (
+            externalId &&
+            (externalId === "openwa:assistant" ||
+              String(externalId).startsWith("openwa:assistant") ||
+              String(externalId).endsWith(":assistant"))
+          ) {
+            const agentService = require("../services/agent-service");
+            const io = req.app.get("io");
+            await agentService.handleAssistantMessage(
+              req.user.id,
+              req.params.chatId,
+              {
+                body: req.body.body,
+                type: req.body.type || "text",
+                mediaFileId: req.body.mediaFileId || null,
+                replyToId: req.body.replyToId || null,
+              },
+              {
+                config,
+                io,
+                sessionManager,
+                clientPlatform: req.headers["x-client-platform"] || null,
+              },
+            );
+            return res.json({ ok: true });
+          }
+        } catch (e) {
+          // ignore lookups and fall back to normal send
+        }
+
         const result = await chatService.createOutgoingMessage({
           userId: req.user.id,
           chatId: req.params.chatId,

@@ -1,3 +1,65 @@
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractOpenRouterText(data) {
+  return data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.text ?? "";
+}
+
+function hasChoices(data) {
+  return Array.isArray(data?.choices) && data.choices.length > 0;
+}
+
+function isRetriableOpenRouterFailure(status, bodyText, data) {
+  if (status >= 500) return true;
+  if (data && !hasChoices(data)) return true;
+  return /no choices|server_error|upstream|overloaded/i.test(
+    String(bodyText || ""),
+  );
+}
+
+async function postOpenRouterJson(url, apiKey, body, maxAttempts = 2) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      lastError = new Error(`OpenRouter request failed: ${res.status} ${text}`);
+      if (
+        attempt < maxAttempts &&
+        isRetriableOpenRouterFailure(res.status, text)
+      ) {
+        await delay(250 * attempt);
+        continue;
+      }
+      throw lastError;
+    }
+
+    const data = await res.json();
+    if (!hasChoices(data)) {
+      lastError = new Error("OpenRouter response contained no choices.");
+      if (attempt < maxAttempts) {
+        await delay(250 * attempt);
+        continue;
+      }
+      throw lastError;
+    }
+
+    return data;
+  }
+
+  throw lastError || new Error("OpenRouter request failed.");
+}
+
 // Minimal OpenRouter adapter stub
 module.exports = {
   listModels: async function (config = {}) {
@@ -62,23 +124,15 @@ module.exports = {
       max_tokens: params.max_tokens,
     };
 
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`OpenRouter request failed: ${res.status} ${text}`);
-    }
-
-    const data = await res.json();
-    const text =
-      data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.text ?? "";
+    const data = await postOpenRouterJson(url, apiKey, body);
+    const text = extractOpenRouterText(data);
     return { text, raw: data };
+  },
+  __internal: {
+    delay,
+    extractOpenRouterText,
+    hasChoices,
+    isRetriableOpenRouterFailure,
+    postOpenRouterJson,
   },
 };

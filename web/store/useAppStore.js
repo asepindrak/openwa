@@ -102,6 +102,7 @@ export const useAppStore = create((set, get) => ({
   activeSessionId: null,
   messagesByChat: {},
   messageMetaByChat: {},
+  terminalRecordsById: {},
   typingByChat: {},
   socket: null,
   hydrateAuth: () => {
@@ -123,6 +124,7 @@ export const useAppStore = create((set, get) => ({
       activeSessionId: null,
       messagesByChat: {},
       messageMetaByChat: {},
+      terminalRecordsById: {},
       typingByChat: {},
       socket: null,
     });
@@ -230,15 +232,34 @@ export const useAppStore = create((set, get) => ({
     });
   },
   addMessage: (message) => {
-    set((state) => ({
-      messagesByChat: {
-        ...state.messagesByChat,
-        [message.chatId]: [
-          ...(state.messagesByChat[message.chatId] || []),
-          message,
-        ],
-      },
-    }));
+    if (!message?.chatId) return;
+    set((state) => {
+      const current = state.messagesByChat[message.chatId] || [];
+      const existingIndex = current.findIndex(
+        (item) =>
+          item.id === message.id ||
+          (message.externalMessageId &&
+            item.externalMessageId === message.externalMessageId),
+      );
+
+      if (existingIndex === -1) {
+        return {
+          messagesByChat: {
+            ...state.messagesByChat,
+            [message.chatId]: [...current, message],
+          },
+        };
+      }
+
+      const next = [...current];
+      next[existingIndex] = { ...next[existingIndex], ...message };
+      return {
+        messagesByChat: {
+          ...state.messagesByChat,
+          [message.chatId]: next,
+        },
+      };
+    });
   },
   updateMessageStatus: ({ messageId, status }) => {
     set((state) => {
@@ -274,6 +295,18 @@ export const useAppStore = create((set, get) => ({
       ),
     }));
   },
+  upsertTerminalRecord: (record) => {
+    if (!record?.id) return;
+    set((state) => ({
+      terminalRecordsById: {
+        ...state.terminalRecordsById,
+        [record.id]: {
+          ...(state.terminalRecordsById[record.id] || {}),
+          ...record,
+        },
+      },
+    }));
+  },
   setTyping: ({ chatId, isTyping, name, userId }) => {
     set((state) => ({
       typingByChat: {
@@ -284,6 +317,7 @@ export const useAppStore = create((set, get) => ({
   },
   setSocket: (socket) => set({ socket }),
   setTerminalAutoApproveAll: async (value) => {
+    const previous = !!get().terminalAutoApproveAll;
     writeTerminalAutoApprove(value);
     set({ terminalAutoApproveAll: !!value });
     try {
@@ -296,7 +330,9 @@ export const useAppStore = create((set, get) => ({
         });
       }
     } catch (e) {
-      // ignore
+      writeTerminalAutoApprove(previous);
+      set({ terminalAutoApproveAll: previous });
+      throw e;
     }
   },
   setDefaultAiProvider: async (providerId) => {

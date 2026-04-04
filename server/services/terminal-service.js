@@ -60,12 +60,18 @@ function runShellCommand(command, timeout = 300000, cwd) {
 
 async function requestExecution(
   userId,
-  { command, approvalMode = "manual", timeout = 300000 } = {},
+  {
+    command,
+    approvalMode = "manual",
+    timeout = 300000,
+    trustedAuto = false,
+    chatId = null,
+  } = {},
   io,
 ) {
   if (!command) throw new Error("command is required");
 
-  const config = getConfig();
+  getConfig();
   const allowlist = (process.env.OPENWA_TERMINAL_ALLOWLIST || "")
     .split(",")
     .map((s) => s.trim())
@@ -82,6 +88,10 @@ async function requestExecution(
     // ignore
   }
 
+  if (userPrefAuto) {
+    approvalMode = "auto";
+  }
+
   const record = await prisma.terminalCommand.create({
     data: {
       userId,
@@ -95,7 +105,8 @@ async function requestExecution(
   // bypassing the host allowlist or the command matches the configured allowlist.
   const canAuto =
     approvalMode === "auto" &&
-    (userPrefAuto ||
+    (trustedAuto ||
+      userPrefAuto ||
       (allowlist.length > 0 &&
         allowlist.some((a) => command.trim().startsWith(a))));
   if (canAuto) {
@@ -121,11 +132,13 @@ async function requestExecution(
       io &&
         io.to(`user:${userId}`).emit("terminal_result", {
           id: record.id,
+          chatId,
           status: res.code === 0 ? "completed" : "failed",
           result,
+          command,
         });
     } catch (e) {}
-    return { id: record.id, executed: true, result };
+    return { id: record.id, chatId, executed: true, result, command };
   }
 
   // Emit request for manual approval
@@ -133,6 +146,7 @@ async function requestExecution(
     io &&
       io.to(`user:${userId}`).emit("terminal_request", {
         id: record.id,
+        chatId,
         userId,
         command,
         approvalMode: record.approvalMode,
@@ -141,7 +155,7 @@ async function requestExecution(
       });
   } catch (e) {}
 
-  return { id: record.id, executed: false };
+  return { id: record.id, chatId, executed: false, command };
 }
 
 async function listPendingRequests(userId) {

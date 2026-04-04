@@ -5,6 +5,15 @@ function userRoom(userId) {
   return `user:${userId}`;
 }
 
+function isAssistantExternalId(externalId) {
+  return (
+    externalId &&
+    (externalId === "openwa:assistant" ||
+      String(externalId).startsWith("openwa:assistant") ||
+      String(externalId).endsWith(":assistant"))
+  );
+}
+
 function registerSocketHandlers({ io, config, sessionManager }) {
   io.use(async (socket, next) => {
     try {
@@ -35,16 +44,17 @@ function registerSocketHandlers({ io, config, sessionManager }) {
         );
         const externalId = chat?.contact?.externalId || null;
 
-        if (
-          externalId &&
-          (externalId === "openwa:assistant" ||
-            String(externalId).endsWith(":assistant"))
-        ) {
+        if (isAssistantExternalId(externalId)) {
           // store outgoing message and let agent handle reply
           await agentService.handleAssistantMessage(
             socket.user.id,
             payload.chatId,
-            payload.body,
+            {
+              body: payload.body,
+              type: payload.type || "text",
+              mediaFileId: payload.mediaFileId || null,
+              replyToId: payload.replyToId || null,
+            },
             { config, io, socket, sessionManager },
           );
           if (ack) ack({ ok: true });
@@ -92,6 +102,31 @@ function registerSocketHandlers({ io, config, sessionManager }) {
 
     socket.on("send_media", async (payload = {}, ack) => {
       try {
+        const agentService = require("../services/agent-service");
+        const chat = await chatService.getChatWithContact(
+          socket.user.id,
+          payload.chatId,
+        );
+        const externalId = chat?.contact?.externalId || null;
+
+        if (isAssistantExternalId(externalId)) {
+          await agentService.handleAssistantMessage(
+            socket.user.id,
+            payload.chatId,
+            {
+              body: payload.body,
+              type: payload.type || "document",
+              mediaFileId: payload.mediaFileId || null,
+              replyToId: payload.replyToId || null,
+            },
+            { config, io, socket, sessionManager },
+          );
+          if (ack) {
+            ack({ ok: true });
+          }
+          return;
+        }
+
         const result = await chatService.createOutgoingMessage({
           userId: socket.user.id,
           chatId: payload.chatId,
