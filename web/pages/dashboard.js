@@ -224,6 +224,17 @@ export default function DashboardPage() {
     });
 
     socketClient.on("typing_event", (payload) => {
+      // Ignore typing events originating from the current user to avoid echoing
+      const state = useAppStore.getState();
+      const currentUserId = state.user?.id;
+      if (
+        payload &&
+        payload.userId &&
+        currentUserId &&
+        payload.userId === currentUserId
+      ) {
+        return;
+      }
       useAppStore.getState().setTyping(payload);
     });
 

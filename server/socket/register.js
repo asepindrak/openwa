@@ -162,7 +162,10 @@ function registerSocketHandlers({ io, config, sessionManager }) {
     });
 
     socket.on("typing", (payload = {}) => {
-      io.to(userRoom(socket.user.id)).emit("typing_event", {
+      // Broadcast typing events to other sockets in the same user room
+      // but exclude the originating socket so the local client doesn't
+      // reflect its own typing as "user is typing".
+      socket.broadcast.to(userRoom(socket.user.id)).emit("typing_event", {
         chatId: payload.chatId,
         isTyping: Boolean(payload.isTyping),
         userId: socket.user.id,
