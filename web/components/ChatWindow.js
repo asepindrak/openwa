@@ -394,6 +394,10 @@ export const ChatWindow = forwardRef(function ChatWindow(
   const [profileOpen, setProfileOpen] = useState(false);
   const [confirmingScanMap, setConfirmingScanMap] = useState({});
   const updateMessage = useAppStore((s) => s.updateMessage);
+  const typingStateByChat = useAppStore((s) => s.typingByChat);
+  const effectiveTypingState =
+    typingState || (chat?.id ? typingStateByChat[chat?.id] : null);
+
   const composerRef = useRef(null);
   const searchInputRef = useRef(null);
   const messagesViewportRef = useRef(null);
@@ -781,8 +785,8 @@ export const ChatWindow = forwardRef(function ChatWindow(
               {chat.contact.displayName}
             </h2>
             <p className="text-sm text-white/40">
-              {typingState?.isTyping
-                ? `${typingState.name} is typing...`
+              {effectiveTypingState?.isTyping
+                ? `${effectiveTypingState.name} is typing...`
                 : "WhatsApp chat synced locally"}
             </p>
           </div>
@@ -1147,6 +1151,20 @@ export const ChatWindow = forwardRef(function ChatWindow(
               }
             });
           })()}
+          {effectiveTypingState?.isTyping && (
+            <div className="flex justify-start">
+              <div className="max-w-[72%] rounded-[18px] bg-[#2e2f2f] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)]">
+                <div className="flex items-center gap-2 text-sm text-white/60 italic">
+                  <span>{effectiveTypingState.name} is thinking...</span>
+                  <div className="flex gap-1">
+                    <span className="h-1 w-1 animate-bounce rounded-full bg-white/40 delay-0" />
+                    <span className="h-1 w-1 animate-bounce rounded-full bg-white/40 delay-150" />
+                    <span className="h-1 w-1 animate-bounce rounded-full bg-white/40 delay-300" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </div>

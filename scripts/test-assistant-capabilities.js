@@ -112,7 +112,7 @@ const path = require("path");
     );
     assert.match(
       internal.getTerminalCommandForTool(
-        "run_copilot",
+        "run_code_agent",
         {},
         { id: "terminal-2", command: 'copilot -sp "install axios"' },
       ) || "",

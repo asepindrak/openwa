@@ -218,6 +218,7 @@ model TerminalCommand {
   id           String                @id @default(cuid())
   userId       String
   command      String
+  cwd          String?
   approvalMode TerminalApprovalMode  @default(manual)
   status       TerminalCommandStatus @default(pending)
   requestedAt  DateTime              @default(now())

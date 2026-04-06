@@ -1,15 +1,109 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
 const { prisma } = require("../database/client");
 const { getConfig } = require("../config");
 const userSettings = require("./user-settings");
+const path = require("path");
+const { workspacesDir } = require("../utils/paths");
 
 function runShellCommand(command, timeout = 300000, cwd) {
   return new Promise((resolve) => {
-    const child = spawn(command, {
-      shell: true,
+    let child;
+    const opts = {
       windowsHide: true,
       cwd: cwd || process.cwd(),
-    });
+    };
+
+    try {
+      if (process.platform === "win32") {
+        // Detect PowerShell-specific constructs and run via PowerShell when available
+        const psPattern =
+          /Out-Null|\bInvoke-|Get-Content|Start-Process|New-Item|Set-Content|Add-Content|Remove-Item|Get-ChildItem|Write-Host|Write-Output|Read-Host|@'|@\"/i;
+        // Detect common bash-only constructs and prefer bash when available
+        const bashPattern =
+          />\/dev\/null|\$\(|sed\s+-i|tail\s+-n|rm\s+-rf|sleep\s+\d+|kill\s+\$\(|\|\s*sed|awk\s+|mkdir\s+-p/i;
+
+        const systemRoot = process.env.SystemRoot || "C:\\Windows";
+        const psPath = path.join(
+          systemRoot,
+          "System32",
+          "WindowsPowerShell",
+          "v1.0",
+          "powershell.exe",
+        );
+        const possibleBash = [
+          path.join("C:", "Program Files", "Git", "bin", "bash.exe"),
+          path.join("C:", "Program Files (x86)", "Git", "bin", "bash.exe"),
+          path.join("C:", "msys64", "usr", "bin", "bash.exe"),
+        ];
+        let bashPath = null;
+        for (const pth of possibleBash) {
+          try {
+            if (fs.existsSync(pth)) {
+              bashPath = pth;
+              break;
+            }
+          } catch (e) {}
+        }
+
+        // Allow an explicit override via OPENWA_TERMINAL_SHELL env var
+        const preferredShell = (
+          process.env.OPENWA_TERMINAL_SHELL || ""
+        ).toLowerCase();
+        if (
+          (preferredShell === "powershell" || preferredShell === "pwsh") &&
+          fs.existsSync(psPath)
+        ) {
+          child = spawn(
+            psPath,
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              String(command || ""),
+            ],
+            opts,
+          );
+        } else if (preferredShell === "bash" && bashPath) {
+          child = spawn(bashPath, ["-lc", String(command || "")], opts);
+        } else if (
+          psPattern.test(String(command || "")) &&
+          fs.existsSync(psPath)
+        ) {
+          // Spawn PowerShell directly with arguments to avoid cmd.exe parsing
+          child = spawn(
+            psPath,
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              String(command || ""),
+            ],
+            opts,
+          );
+        } else if (bashPattern.test(String(command || "")) && bashPath) {
+          // Use bash -lc when bash is available (Git Bash / msys)
+          child = spawn(bashPath, ["-lc", String(command || "")], opts);
+        } else {
+          // Default: use cmd /c via shell=true to preserve legacy behavior
+          child = spawn(command, { shell: true, ...opts });
+        }
+      } else {
+        // Non-Windows: use the default shell (usually /bin/sh)
+        child = spawn(command, { shell: true, ...opts });
+      }
+    } catch (e) {
+      // Fallback to previous behavior
+      child = spawn(command, {
+        shell: true,
+        windowsHide: true,
+        cwd: cwd || process.cwd(),
+      });
+    }
     let stdout = "";
     let stderr = "";
     let finished = false;
@@ -66,11 +160,31 @@ async function requestExecution(
     timeout = 300000,
     trustedAuto = false,
     chatId = null,
+    cwd,
   } = {},
   io,
 ) {
   if (!command) throw new Error("command is required");
+  // Normalize and resolve cwd: always restrict to workspacesDir
+  let effectiveCwd = workspacesDir;
+  try {
+    if (cwd) {
+      // If absolute, resolve; if relative, resolve against workspacesDir
+      const resolved = path.resolve(workspacesDir, String(cwd || ""));
+      // Ensure resolved path is inside workspacesDir
+      const root = path.resolve(workspacesDir);
+      if (!resolved.startsWith(root)) {
+        throw new Error("cwd outside allowed workspaces directory");
+      }
+      effectiveCwd = resolved;
+    }
+  } catch (e) {
+    throw new Error(`invalid cwd: ${e && e.message}`);
+  }
 
+  console.info(
+    `[terminal-service] requestExecution user=${userId} command=${String(command).slice(0, 200)} cwd=${effectiveCwd}`,
+  );
   getConfig();
   const allowlist = (process.env.OPENWA_TERMINAL_ALLOWLIST || "")
     .split(",")
@@ -98,6 +212,7 @@ async function requestExecution(
       command,
       approvalMode: approvalMode === "auto" ? "auto" : "manual",
       status: "pending",
+      cwd: effectiveCwd || null,
     },
   });
 
@@ -114,7 +229,7 @@ async function requestExecution(
       where: { id: record.id },
       data: { status: "running" },
     });
-    const res = await runShellCommand(command, timeout);
+    const res = await runShellCommand(command, timeout, effectiveCwd);
     const result = {
       stdout: res.stdout,
       stderr: res.stderr,
@@ -136,9 +251,17 @@ async function requestExecution(
           status: res.code === 0 ? "completed" : "failed",
           result,
           command,
+          cwd: effectiveCwd,
         });
     } catch (e) {}
-    return { id: record.id, chatId, executed: true, result, command };
+    return {
+      id: record.id,
+      chatId,
+      executed: true,
+      result,
+      command,
+      cwd: effectiveCwd,
+    };
   }
 
   // Emit request for manual approval

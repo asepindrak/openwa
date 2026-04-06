@@ -12,8 +12,31 @@ Default skills
 - `create_api_key` — Generate an API key for the user.
 - `update_webhook` — Set incoming webhook URL and key.
 - `update_tools_md` — Append or update human-readable entries in this file when new external tools are registered.
+- `get_webpage` — Fetch and read the content of a URL (static or dynamic).
+- `open_browser` — Open a browser to read a URL, useful for JavaScript-heavy sites.
+- `list_workspaces` — List all project folders inside the global workspaces directory.
 
 Detailed examples for commonly-used tools
+
+- `get_webpage` (get_webpage)
+
+  Description: fetches the text content of a webpage. It first tries a fast fetch and falls back to a headless browser if needed.
+
+  Example request:
+
+  ```json
+  { "url": "https://example.com" }
+  ```
+
+- `open_browser` (open_browser)
+
+  Description: opens a headless browser (Playwright) to navigate to a URL and extract text content. Use this for complex sites or Single Page Applications (SPAs).
+
+  Example request:
+
+  ```json
+  { "url": "https://huggingface.co/microsoft/bitnet-b1.58-2B-4T" }
+  ```
 
 - `run_terminal` (run_terminal)
 
@@ -25,10 +48,12 @@ Detailed examples for commonly-used tools
   {
     "command": "npm run build",
     "approvalMode": "manual",
-    "cwd": "workspaces/my-project",
+    "cwd": "my-project-folder",
     "timeout": 120000
   }
   ```
+
+  Note: `cwd` is relative to the global workspaces directory.
 
   Example response:
 
@@ -64,25 +89,26 @@ Detailed examples for commonly-used tools
   { "results": [{ "id": "m1", "chatId": "12345@c.us", "text": "Invoice attached", "media": [...] } ] }
   ```
 
-- `run_copilot` (run_copilot)
+- `run_code_agent` (run_code_agent)
 
-  Description: run the local `copilot` CLI with a short prompt. Returns captured stdout/stderr and exit code.
+  Description: invoke the local LLM-driven coding agent which plans and executes coding tasks inside the workspace. The agent uses the server-configured LLM via the internal orchestrator and tool-executor, and may create/modify files or run terminal commands as part of its plan.
 
   Example request:
 
   ```json
-  { "prompt": "create api route nextjs create order" }
+  { "prompt": "create api route nextjs create order", "cwd": "my-project" }
   ```
 
-  Example response:
+  Example response (structured):
 
   ```json
-  { "exitCode": 0, "stdout": "Created pages/api/orders.js", "stderr": "" }
+  { "ok": true, "result": { "success": true, "logs": { ... } } }
   ```
 
   Notes:
-  - `copilot` must be installed on the host.
-  - The `copilot` command is executed inside the `workspaces/` folder at the project root; place projects you want Copilot to edit under `workspaces/` first.
+  - The coding agent does not depend on an external Copilot CLI; it uses the configured LLM provider.
+  - All file operations and terminal commands are executed relative to the `workspaces/` directory.
+  - Auto-execution of terminal steps depends on server settings (`OPENWA_TERMINAL_ALLOWLIST` and user preferences). When the agent requests terminal execution it may set `trustedAuto: true` for convenience.
 
 - Coding capabilities
 
@@ -159,3 +185,35 @@ Notes:
 
 - Replace `<tool_id>`, `<USER_JWT>`, `<API_KEY>`, and host as appropriate.
 - For dashboard actions (register), use a valid dashboard JWT (dashboard-only middleware). For regular invocations, either a user JWT or an API key is accepted.
+
+PowerShell quoting note
+
+- Issue: PowerShell parses single and double quotes differently than bash. Commands copied from bash examples that use nested single quotes can trigger errors like "The string is missing the terminator: '".
+- Guidance: When running curl/HTTP examples in PowerShell, prefer:
+  - Use double quotes for arguments and headers, and single quotes for JSON payloads when possible.
+  - Or use PowerShell's `Invoke-RestMethod` / `Invoke-WebRequest` which avoids shell quoting pitfalls.
+
+Examples (Bash):
+
+```bash
+curl -X POST 'http://localhost:3000/api/agent/register-tool-url' \
+  -H 'Authorization: Bearer <DASHBOARD_JWT>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://example.com/manifest.json",
+    "apiKey": "<MANIFEST_API_KEY>",
+    "overwrite": true
+  }'
+```
+
+PowerShell (recommended):
+
+```powershell
+curl -X POST "http://localhost:3000/api/agent/register-tool-url" `
+  -H "Authorization: Bearer <DASHBOARD_JWT>" `
+  -H "Content-Type: application/json" `
+  -d '{"url":"https://example.com/manifest.json","apiKey":"<MANIFEST_API_KEY>","overwrite":true}'
+
+# Or use Invoke-RestMethod for native PowerShell behavior:
+Invoke-RestMethod -Method Post -Uri 'http://localhost:3000/api/agent/register-tool-url' -Headers @{"Authorization"="Bearer <DASHBOARD_JWT>";"Content-Type"="application/json"} -Body '{"url":"https://example.com/manifest.json","apiKey":"<MANIFEST_API_KEY>","overwrite":true}'
+```

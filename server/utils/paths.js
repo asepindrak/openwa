@@ -19,6 +19,9 @@ function getDefaultDataDir() {
 
 const storageDir = getDefaultDataDir();
 const legacyStorageDir = path.join(rootDir, "storage");
+// Prefer an explicit env override. When not set, default to the user data
+// directory under the user's home (e.g. ~/.openwa/workspaces). This ensures
+// agent-run scaffolding targets the per-user data area by default.
 const workspacesDir = process.env.OPENWA_WORKSPACES_DIR
   ? path.resolve(String(process.env.OPENWA_WORKSPACES_DIR))
   : path.join(storageDir, "workspaces");
@@ -168,5 +171,6 @@ module.exports = {
   workspacesDir,
   prismaSchemaPath,
   webDir,
+  ensureDir,
   ensureRuntimeDirs,
 };

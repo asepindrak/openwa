@@ -6,6 +6,7 @@ const {
   storageDir,
   workspacesDir,
   ensureRuntimeDirs,
+  ensureDir,
 } = require("../utils/paths");
 const IDENTITY_PATH = path.join(storageDir, "IDENTITY.md");
 const TOOLS_PATH = path.join(storageDir, "TOOLS.md");
@@ -17,10 +18,13 @@ const apiKeyService = require("./api-key-service");
 const webhookService = require("./webhook-service");
 const sessionService = require("./session-service");
 const terminalService = require("./terminal-service");
+const orchestrator = require("./agent-orchestrator");
+const toolExecutor = require("./tool-executor");
 const { prisma } = require("../database/client");
 const { v4: uuidv4 } = require("uuid");
 const toolCredentialService = require("./tool-credential-service");
 const userSettings = require("./user-settings");
+const { fetchWebpage, openBrowser } = require("../utils/browser");
 const OS_NAME_MAP = { win32: "Windows", darwin: "macOS", linux: "Linux" };
 const hostPlatform = process.platform || "unknown";
 const hostOS = OS_NAME_MAP[hostPlatform] || hostPlatform;
@@ -474,10 +478,22 @@ async function chooseProviderId(userId) {
 
 function tryParseJsonObject(text) {
   if (!text) return null;
+  // Look for the last JSON object in the string to allow trailing prose if needed,
+  // but usually models put the JSON at the end or start.
+  // We'll stick to finding the first/main block.
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
+  // If the text contains triple backticks around the JSON, take the part inside
+  let jsonStr = m[0];
+  const markdownMatch = text.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/i);
+  if (markdownMatch) {
+    jsonStr = markdownMatch[1];
+  }
   try {
-    return JSON.parse(m[0]);
+    const parsed = JSON.parse(jsonStr);
+    // Store where the JSON block (or markdown block containing it) started
+    parsed.__jsonStart = markdownMatch ? markdownMatch.index : m.index;
+    return parsed;
   } catch (e) {
     return null;
   }
@@ -583,12 +599,75 @@ function buildAssistantSystemPrompt({
     ? `\n\nIDENTITY.md:\n${String(identityText || "").trim()}`
     : "";
   const platformName = OS_NAME_MAP[clientPlatform] || clientPlatform || hostOS;
+  const personaSection = personaText
+    ? `Assistant Persona (Your Personality & Tone):\n${personaText}\n\n`
+    : "";
 
-  return `${personaText || `You are ${assistantDisplayName}, an OpenWA assistant that executes the correct internal tool instead of replying with generic how-to steps when a supported action is clear.`}\n\nAssistant profile:\n- displayName: ${assistantDisplayName}\n- externalId: ${assistantExternalId}\n- hostOS: ${hostOS}\n- userPlatform: ${platformName}\n\nResponse format rules:\n- When you are not calling a tool, write in concise GitHub-flavored Markdown.\n- Use short paragraphs by default.\n- Use flat bullet or numbered lists only when the content is naturally list-shaped.\n- Use fenced code blocks for commands, JSON, or multi-line snippets.\n- Use inline code for commands, paths, env vars, and identifiers.\n- Do not wrap normal prose in code fences.\n- Do not output Markdown code fences when you are returning a tool-call JSON object; return raw JSON only.\n\nYou can perform configuration actions and call tools when requested. Available tools: ${Object.keys(
-    tools,
-  )}.\n\nFor supported local app launch requests on the user's device, prefer calling run_terminal with the correct OS command instead of describing manual steps. When a user message contains an attachment marker or image content, treat the file as already attached in the current chat. Do not ask the user to upload the file again unless the attachment is explicitly missing or corrupted.${identitySection}\n\nTOOLS.md:\n${toolsText}\n\nOpenAPI doc (JSON):\n${openapiText}\n\nWhen you want to execute a tool, respond with a JSON object only, for example: {"tool":"add_device","args":{"name":"Sales","phoneNumber":"12345"}}. Otherwise respond with a plain text message for the user.`;
+  const toolsList = Object.keys(tools || {}).join(", ");
+
+  const parts = [];
+  parts.push(
+    `You are ${assistantDisplayName}, an autonomous OpenWA assistant. Your goal is to complete user tasks by planning and executing multiple steps using available tools.`,
+  );
+  if (personaSection) parts.push(personaSection);
+  parts.push("Assistant profile:");
+  parts.push(`- displayName: ${assistantDisplayName}`);
+  parts.push(`- externalId: ${assistantExternalId}`);
+  parts.push(`- hostOS: ${hostOS}`);
+  parts.push(`- userPlatform: ${platformName}`);
+  parts.push(`- workspacesRoot: ${workspacesDir}`);
+  parts.push("");
+  parts.push("Response format rules:");
+  parts.push(
+    "- When you are not calling a tool, write in concise GitHub-flavored Markdown.",
+  );
+  parts.push("- Use short paragraphs by default.");
+  parts.push(
+    "- Use flat bullet or numbered lists only when the content is naturally list-shaped.",
+  );
+  parts.push(
+    "- Use fenced code blocks for commands, JSON, or multi-line snippets.",
+  );
+  parts.push(
+    "- Use inline code for commands, paths, env vars, and identifiers.",
+  );
+  parts.push("- Do not wrap normal prose in code fences.");
+  parts.push(
+    "- When you want to execute a tool, YOU MUST RESPOND with a JSON object. You can optionally include your thinking/planning prose BEFORE the JSON object.",
+  );
+  parts.push(
+    "- If you include prose, wrap the tool-call JSON in a JSON code block (for example, a triple-backtick fence with the language set to 'json').",
+  );
+  parts.push("");
+  parts.push("Strategy & Autonomy:");
+  parts.push(
+    "1. Plan Ahead: If a task requires multiple steps, mention your plan briefly before calling the first tool.",
+  );
+  parts.push(
+    "2. Coding & Scaffolding: For ANY coding task (create project, add features, fix bugs, scaffold files), use 'run_code_agent' first. If the agent cannot complete the task, you may fallback to other tools.",
+  );
+  parts.push(
+    "3. Fail-Soft: If the code agent fails or cannot fulfill a specific requirement, only then fallback to 'run_terminal' for manual corrections.",
+  );
+  parts.push(
+    "4. Workspace Management: All user projects must be created and managed inside the workspaces directory (resolved as ${workspacesDir}). Use relative paths in 'cwd' to work inside project folders.",
+  );
+  parts.push(
+    "5. Iteration: Analyze tool results. If a command fails, describe why in prose and try a different approach.",
+  );
+  parts.push("");
+  parts.push(`Available tools: ${toolsList}.`);
+  parts.push("");
+  parts.push(`TOOLS.md:\n${toolsText}`);
+  parts.push("");
+  parts.push(`OpenAPI doc (JSON):\n${openapiText}`);
+  parts.push("");
+  parts.push(
+    `When you want to execute a tool, respond with a JSON object. Example: {"tool":"run_code_agent","args":{"prompt":"create a nextjs app with tailwind","cwd":"my-app"}}.`,
+  );
+
+  return parts.filter(Boolean).join("\n");
 }
-
 function normalizeAssistantInput(input) {
   if (typeof input === "string") {
     return {
@@ -710,19 +789,14 @@ function buildUserRequestSummaryText({ body, mediaFile }) {
 
 function formatLlmErrorForUser(error) {
   const message = String(error?.message || error || "");
+  console.error("[Assistant LLM Error]:", error);
+
   if (!message) {
     return "Model AI sedang bermasalah. Coba kirim lagi beberapa saat lagi.";
   }
 
-  if (
-    /openai request failed|response contained no choices|server_error|llm generate failed/i.test(
-      message,
-    )
-  ) {
-    return "Model AI dari provider sedang bermasalah sementara. Pesan Anda sudah diterima, silakan coba lagi beberapa saat lagi.";
-  }
-
-  return `Model AI gagal memproses permintaan saat ini. ${message}`;
+  // Show detailed error message so user can understand if it's a context window or API limit issue
+  return `Model AI gagal memproses permintaan. Detail: ${message}`;
 }
 
 function buildToolResultFallbackText(toolName, toolResult) {
@@ -746,10 +820,12 @@ async function storeAssistantTerminalMessage({
   terminalId,
   executed,
   io,
+  toolName,
 }) {
+  const typeLabel = toolName === "run_code_agent" ? "CodeAgent" : "Terminal";
   const body = executed
-    ? `Terminal command finished: ${command}`
-    : `Terminal command pending approval: ${command}`;
+    ? `${typeLabel} command finished: ${command}`
+    : `${typeLabel} command pending approval: ${command}`;
 
   const assistantMsg = chatId
     ? await chatService.storeIncomingMessageInChat({
@@ -784,7 +860,7 @@ function getTerminalCommandForTool(toolName, args, toolResult) {
     return String(args?.command || toolResult?.command || "").trim() || null;
   }
 
-  if (toolName === "run_copilot") {
+  if (toolName === "run_code_agent") {
     return String(toolResult?.command || "").trim() || null;
   }
 
@@ -854,8 +930,31 @@ const tools = {
     return { ok: true, webhook: cfg };
   },
   run_terminal: async (userId, args, ctx) => {
-    const { command, approvalMode, timeout = 300000, trustedAuto } = args || {};
+    const {
+      command,
+      approvalMode,
+      timeout = 600000,
+      trustedAuto,
+      cwd,
+    } = args || {};
     if (!command) throw new Error("command is required");
+
+    // Default to workspacesDir if no relative cwd provided, or resolve relative to workspacesDir
+    let effectiveCwd = workspacesDir;
+    if (cwd) {
+      // Normalize 'workspaces' as relative cwd to just be the root
+      const normalizedCwd = String(cwd)
+        .trim()
+        .replace(/^[\\\/]+|[\\\/]+$/g, "");
+      if (normalizedCwd === "workspaces") {
+        effectiveCwd = workspacesDir;
+      } else {
+        effectiveCwd = path.isAbsolute(cwd)
+          ? cwd
+          : path.join(workspacesDir, cwd);
+      }
+    }
+    ensureDir(effectiveCwd);
 
     // If the user has enabled auto-approve in settings, prefer auto when
     // approvalMode isn't explicitly set to 'manual'. This ensures server-side
@@ -880,34 +979,44 @@ const tools = {
         timeout,
         trustedAuto: !!trustedAuto,
         chatId: ctx?.chatId || null,
+        cwd: effectiveCwd,
       },
       ctx && ctx.io,
     );
     return res;
   },
-  run_copilot: async (userId, args, ctx) => {
+  run_code_agent: async (userId, args, ctx) => {
+    // LLM-driven local coding agent: use the orchestrator to plan and execute
+    // coding tasks. Accepts { prompt, cwd, maxSteps }.
     const prompt = String(args.prompt || args.command || "").trim();
     if (!prompt) throw new Error("prompt is required");
-    const escaped = prompt.replace(/"/g, '\\"');
-    const command = `copilot -sp "${escaped}"`;
-    const timeout = Number(args.timeout) || 300000;
+    const maxSteps = Number(args.maxSteps) || 6;
 
-    try {
-      const execRes = await terminalService.requestExecution(
-        userId,
-        { command, approvalMode: "auto", timeout, chatId: ctx?.chatId || null },
-        ctx && ctx.io,
-      );
+    const orchesRes = await orchestrator.orchestrate({
+      userId,
+      message: prompt,
+      context: Object.assign({}, ctx, { cwd: args && args.cwd }),
+      maxSteps,
+    });
+
+    if (!orchesRes || !orchesRes.success) {
       return {
-        ok: true,
-        command,
-        id: execRes?.id,
-        executed: !!execRes?.executed,
-        result: execRes?.result,
+        ok: false,
+        error:
+          orchesRes && orchesRes.error
+            ? orchesRes.error
+            : "orchestrator_failed",
+        result: orchesRes,
       };
-    } catch (err) {
-      throw new Error(`copilot execution failed: ${err.message}`);
     }
+
+    return {
+      ok: true,
+      command: null,
+      id: null,
+      executed: true,
+      result: orchesRes,
+    };
   },
   search_messages: async (userId, args) => {
     const q = String(args.q || "").trim();
@@ -1005,6 +1114,21 @@ const tools = {
     });
     return res;
   },
+  list_workspaces: async (userId, args) => {
+    ensureDir(workspacesDir);
+    const items = fs.readdirSync(workspacesDir);
+    const stats = items.map((name) => {
+      const fullPath = path.join(workspacesDir, name);
+      const s = fs.statSync(fullPath);
+      return {
+        name,
+        isDirectory: s.isDirectory(),
+        size: s.size,
+        updatedAt: s.mtime,
+      };
+    });
+    return { ok: true, workspacesPath: workspacesDir, items: stats };
+  },
   invoke_registered_tool: async (userId, args, ctx) => {
     const toolId = args.id || args.toolId || args.name;
     if (!toolId) throw new Error("tool id is required");
@@ -1019,6 +1143,22 @@ const tools = {
       content: content || "",
     });
     return { ok: true };
+  },
+  get_webpage: async (userId, args) => {
+    const url = String(args.url || args.link || "").trim();
+    if (!url) throw new Error("url is required");
+    const result = await fetchWebpage(url);
+    if (!result.ok) {
+      // Fallback to openBrowser if fetch fails (could be JS-heavy)
+      return await openBrowser(url);
+    }
+    return { ok: true, content: (result.body || "").substring(0, 30000) };
+  },
+  open_browser: async (userId, args) => {
+    const url = String(args.url || args.link || "").trim();
+    if (!url) throw new Error("url is required");
+    const result = await openBrowser(url);
+    return result;
   },
 };
 
@@ -1329,6 +1469,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
         terminalId: toolResult.id,
         executed: !!toolResult.executed,
         io,
+        toolName: directToolCall.tool,
       });
       return;
     }
@@ -1350,191 +1491,297 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
     return;
   }
 
-  // First LLM call: include chat context when available
-  let llmResp;
-  try {
-    const messagesForLLM = [{ role: "system", content: systemPrompt }];
+  // --- Start Autonomous Loop ---
+  let turn = 0;
+  const maxTurns = 10;
+  const conversationHistory = [];
 
-    if (clientPlatform) {
-      messagesForLLM.push({
-        role: "system",
-        content: `User device platform: ${clientPlatform}. When providing instructions to open local applications or run OS-specific steps, prefer commands and UI flows for ${clientPlatform}.`,
+  // Initialize history with system prompt
+  conversationHistory.push({ role: "system", content: systemPrompt });
+  if (clientPlatform) {
+    conversationHistory.push({
+      role: "system",
+      content: `User device platform: ${clientPlatform}. When providing instructions to open local applications or run OS-specific steps, prefer commands and UI flows for ${clientPlatform}.`,
+    });
+  }
+
+  if (chatSummary) {
+    conversationHistory.push({
+      role: "system",
+      content: `Active chat with ${chatSummary.contact.displayName} (externalId: ${chatSummary.contact.externalId}). Persona: ${chatSummary.contact.persona || "not set"}. Include recent messages as context.`,
+    });
+
+    try {
+      const hist = await chatService.listMessages(userId, chatId, {
+        take: 10, // Reduced from 40 to prevent context window overflow/fetch failures
       });
-    }
-
-    if (chatSummary) {
-      messagesForLLM.push({
-        role: "system",
-        content: `Active chat with ${chatSummary.contact.displayName} (externalId: ${chatSummary.contact.externalId}). Persona: ${chatSummary.contact.persona || "not set"}. Include recent messages as context.`,
-      });
-
-      try {
-        const hist = await chatService.listMessages(userId, chatId, {
-          take: 40,
+      const recent = (hist.messages || [])
+        .reverse() // listMessages likely returns desc, we need asc for LLM history
+        .map((m) => {
+          // Truncate long message bodies in history to keep context clean
+          const body = String(m.body || "");
+          return {
+            ...m,
+            body: body.length > 2000 ? body.substring(0, 2000) + "..." : body,
+          };
         });
-        const recent = hist.messages || [];
-        for (const m of recent) {
-          const role = m.direction === "outbound" ? "user" : "assistant";
-          const content = buildMessageContentForLLM(m);
-          messagesForLLM.push({ role, content });
-        }
-      } catch (e) {
-        // ignore history errors
+
+      for (const m of recent) {
+        const role = m.direction === "outbound" ? "user" : "assistant";
+        const content = buildMessageContentForLLM(m);
+        conversationHistory.push({ role, content });
       }
+    } catch (e) {
+      // ignore history errors
     }
-
-    const currentUserContent = buildLlmUserContent({
-      body: assistantInput.body,
-      mediaFile,
-      providerName,
-    });
-
-    messagesForLLM.push({
-      role: "user",
-      content:
-        currentUserContent ||
-        llmUserMessage ||
-        assistantInput.body ||
-        "User sent an empty message.",
-    });
-
-    llmResp = await llmService.generate(userId, {
-      providerId,
-      messages: messagesForLLM,
-    });
-  } catch (err) {
-    const fail = formatLlmErrorForUser(err);
-    const assistantMsg = await chatService.storeIncomingMessage({
-      userId,
-      sessionId: null,
-      sender: assistantSender,
-      displayName: assistantDisplayName,
-      body: fail,
-    });
-    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
-    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
-    return;
   }
 
-  const text = String(llmResp?.text || "").trim();
-
-  if (!text) {
-    const assistantMsg = await chatService.storeIncomingMessage({
-      userId,
-      sessionId: null,
-      sender: assistantSender,
-      displayName: assistantDisplayName,
-      body: "Model AI tidak mengembalikan isi respons. Silakan coba lagi.",
-    });
-    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
-    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
-    return;
-  }
-
-  const maybe = tryParseJsonObject(text);
-  if (!maybe || !maybe.tool) {
-    // plain reply
-    const assistantMsg = await chatService.storeIncomingMessage({
-      userId,
-      sessionId: null,
-      sender: assistantSender,
-      displayName: assistantDisplayName,
-      body: text,
-    });
-    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
-    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
-    return;
-  }
-
-  const toolName = String(maybe.tool || "");
-  const args = maybe.args || {};
-
-  if (!tools[toolName]) {
-    const errMsg = `Requested tool not found: ${toolName}`;
-    const assistantMsg = await chatService.storeIncomingMessage({
-      userId,
-      sessionId: null,
-      sender: assistantSender,
-      displayName: assistantDisplayName,
-      body: errMsg,
-    });
-    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
-    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
-    return;
-  }
-
-  // Execute tool
-  let toolResult;
-  try {
-    toolResult = await tools[toolName](userId, args, ctx);
-  } catch (err) {
-    const assistErr = `Tool error: ${err.message}`;
-    const assistantMsg = await chatService.storeIncomingMessage({
-      userId,
-      sessionId: null,
-      sender: assistantSender,
-      displayName: assistantDisplayName,
-      body: assistErr,
-    });
-    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
-    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
-    return;
-  }
-
-  const terminalCommand = getTerminalCommandForTool(toolName, args, toolResult);
-  if (terminalCommand && toolResult?.id) {
-    await storeAssistantTerminalMessage({
-      userId,
-      chatId,
-      assistantSender,
-      assistantDisplayName,
-      command: terminalCommand,
-      terminalId: toolResult.id,
-      executed: !!toolResult.executed,
-      io,
-    });
-    return;
-  }
-
-  // Let LLM summarize the tool result for the user
-  let finalText = buildToolResultFallbackText(toolName, toolResult);
-  try {
-    const summaryResp = await llmService.generate(userId, {
-      providerId,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `User requested: ${buildUserRequestSummaryText({ body: assistantInput.body, mediaFile })}`,
-        },
-        {
-          role: "assistant",
-          content: `Tool ${toolName} returned: ${JSON.stringify(toolResult)}`,
-        },
-        {
-          role: "user",
-          content:
-            "Please produce a short, friendly summary for the user explaining what I did and any next steps.",
-        },
-      ],
-    });
-
-    if (summaryResp && summaryResp.text) {
-      finalText = summaryResp.text;
-    }
-  } catch (e) {
-    // ignore and fall back to default finalText
-  }
-
-  const assistantMsg = await chatService.storeIncomingMessage({
-    userId,
-    sessionId: null,
-    sender: assistantSender,
-    displayName: assistantDisplayName,
-    body: finalText,
+  const currentUserContent = buildLlmUserContent({
+    body: assistantInput.body,
+    mediaFile,
+    providerName,
   });
-  io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
-  io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
+
+  conversationHistory.push({
+    role: "user",
+    content:
+      currentUserContent ||
+      llmUserMessage ||
+      assistantInput.body ||
+      "User sent an empty message.",
+  });
+
+  // Notify frontend that agent is starting work
+  if (io && chatId) {
+    io.to(`user:${userId}`).emit("typing_event", {
+      chatId,
+      isTyping: true,
+      name: assistantDisplayName,
+      userId: "openwa:assistant",
+    });
+  }
+
+  try {
+    while (turn < maxTurns) {
+      turn++;
+      let llmResp;
+      try {
+        llmResp = await llmService.generate(userId, {
+          providerId,
+          messages: conversationHistory,
+          model: "gpt-5-mini", // force gpt-5-mini for agent reasoning
+        });
+      } catch (err) {
+        const fail = formatLlmErrorForUser(err);
+        await sendAssistantMessage(
+          userId,
+          assistantSender,
+          assistantDisplayName,
+          fail,
+          io,
+        );
+        return;
+      }
+
+      const text = String(llmResp?.text || "").trim();
+      if (!text) {
+        await sendAssistantMessage(
+          userId,
+          assistantSender,
+          assistantDisplayName,
+          "Model AI tidak mengembalikan isi respons.",
+          io,
+        );
+        return;
+      }
+
+      // Add assistant turn to history
+      conversationHistory.push({ role: "assistant", content: text });
+
+      const maybe = tryParseJsonObject(text);
+      if (!maybe || !maybe.tool) {
+        // Final prose reply
+        await sendAssistantMessage(
+          userId,
+          assistantSender,
+          assistantDisplayName,
+          text,
+          io,
+        );
+        return;
+      }
+
+      // Handle extraction of thinking prose before JSON
+      const jsonStart =
+        typeof maybe.__jsonStart === "number" ? maybe.__jsonStart : -1;
+      const thinkingText =
+        jsonStart > 0 ? text.substring(0, jsonStart).trim() : "";
+      if (thinkingText) {
+        await sendAssistantMessage(
+          userId,
+          assistantSender,
+          assistantDisplayName,
+          thinkingText,
+          io,
+        );
+      } else if (text.includes("{") && text.includes("}")) {
+        // If there's prose AFTER the JSON or if it was formatted oddly but parsed
+        const beforeJson = text.split(/{/)[0].trim();
+        if (beforeJson && beforeJson.length > 5) {
+          await sendAssistantMessage(
+            userId,
+            assistantSender,
+            assistantDisplayName,
+            beforeJson,
+            io,
+          );
+        }
+      }
+
+      const toolName = String(maybe.tool || "");
+      const args = maybe.args || {};
+
+      if (!tools[toolName]) {
+        const errMsg = `Requested tool not found: ${toolName}`;
+        conversationHistory.push({ role: "user", content: errMsg });
+        continue;
+      }
+
+      // Process and execute tool
+      let toolResult;
+      try {
+        // Route run_code_agent invocations through the internal orchestrator.
+        // This replaces the old Copilot CLI dependency with the LLM-driven agent.
+        if (toolName === "run_code_agent") {
+          // Build a concise execution message for the orchestrator
+          let promptForExec = "";
+          if (args && args.prompt) promptForExec = args.prompt;
+          else if (args && args.command) promptForExec = args.command;
+          else {
+            const lastUser = [...conversationHistory]
+              .reverse()
+              .find((m) => m.role === "user");
+            promptForExec =
+              (lastUser && lastUser.content) || assistantInput.body || "";
+          }
+
+          const orchesRes = await orchestrator.orchestrate({
+            userId,
+            message: promptForExec,
+            context: Object.assign({}, ctx, { cwd: args && args.cwd }),
+            maxSteps: 6,
+          });
+
+          if (!orchesRes || !orchesRes.success) {
+            throw new Error(
+              orchesRes && orchesRes.error
+                ? orchesRes.error
+                : "orchestrator failed",
+            );
+          }
+
+          // Synthesize a run_code_agent-like tool result for compatibility
+          toolResult = {
+            ok: true,
+            id: null,
+            executed: true,
+            result: orchesRes,
+          };
+        } else {
+          toolResult = await tools[toolName](userId, args, ctx);
+        }
+      } catch (err) {
+        const assistErr = `Tool error: ${err.message}`;
+        conversationHistory.push({ role: "user", content: assistErr });
+        // Fallback: if code agent fails, try run_terminal if prompt is present
+        if (
+          toolName === "run_code_agent" &&
+          (/agent execution failed/i.test(err.message) ||
+            /LLM generate failed/i.test(err.message) ||
+            /fetch failed/i.test(err.message)) &&
+          args &&
+          args.prompt
+        ) {
+          conversationHistory.push({
+            role: "user",
+            content: `Code agent gagal. Analisa prompt berikut dan buat perintah terminal yang paling relevan dan tepat untuk mencapai tujuan tersebut, lalu jalankan dengan run_terminal di cwd yang sama. Jangan gunakan perintah generik, pastikan sesuai kebutuhan prompt. Prompt: "${args.prompt}"`,
+          });
+        }
+        continue;
+      }
+
+      // Special case: terminal commands (async approval)
+      const terminalCommand = getTerminalCommandForTool(
+        toolName,
+        args,
+        toolResult,
+      );
+      if (terminalCommand && toolResult?.id) {
+        await storeAssistantTerminalMessage({
+          userId,
+          chatId,
+          assistantSender,
+          assistantDisplayName,
+          command: terminalCommand,
+          terminalId: toolResult.id,
+          executed: !!toolResult.executed,
+          io,
+          toolName,
+        });
+        // If NOT executed immediately (waiting for manual approval), we stop the loop here.
+        if (!toolResult.executed) return;
+
+        // If auto-executed, feed back result and continue
+        conversationHistory.push({
+          role: "user",
+          content: `Tool '${toolName}' execution result: ${JSON.stringify(toolResult)}`,
+        });
+        continue;
+      }
+
+      // Normal tool execution feed back
+      conversationHistory.push({
+        role: "user",
+        content: `Tool '${toolName}' execution result: ${JSON.stringify(toolResult)}. Please continue based on this result.`,
+      });
+    }
+
+    if (turn >= maxTurns) {
+      await sendAssistantMessage(
+        userId,
+        assistantSender,
+        assistantDisplayName,
+        "Task exceeds maximum turns limit.",
+        io,
+      );
+    }
+  } finally {
+    // Notify frontend that agent is done or waiting
+    if (io && chatId) {
+      io.to(`user:${userId}`).emit("typing_event", {
+        chatId,
+        isTyping: false,
+        name: assistantDisplayName,
+        userId: "openwa:assistant",
+      });
+    }
+  }
+}
+
+async function sendAssistantMessage(userId, sender, displayName, body, io) {
+  try {
+    const assistantMsg = await chatService.storeIncomingMessage({
+      userId,
+      sessionId: null,
+      sender,
+      displayName,
+      body,
+    });
+    io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
+    io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
+  } catch (e) {
+    // ignore
+  }
 }
 
 module.exports = {

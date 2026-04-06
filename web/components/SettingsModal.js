@@ -927,7 +927,7 @@ export function SettingsModal({
                           <div className="flex items-center gap-2 mt-2">
                             <input
                               className="flex-1 w-full rounded-[10px] bg-[#0f1111] px-3 py-2 text-sm text-white outline-none"
-                              placeholder="Enter model id (e.g. copilot/gpt-5-mini)"
+                              placeholder="Enter model id (e.g. gpt-5-mini)"
                               value={manualModelByProvider[p.id] || ""}
                               onChange={(e) =>
                                 setManualModelByProvider((prev) => ({
