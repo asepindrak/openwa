@@ -316,4 +316,4 @@ Recommended call order:
 6. `GET /api/chats/{chatId}/messages`
 7. `POST /api/chats/{chatId}/messages/send`
 
-If you need an agent-oriented markdown guide directly from the runtime, use `GET /docs/readme`.
+## If you need an agent-oriented markdown guide directly from the runtime, use `GET /docs/readme`.
