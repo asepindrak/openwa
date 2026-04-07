@@ -1259,12 +1259,79 @@ async function updateContact(
   return { id: null, contact: updated };
 }
 
+async function deleteAssistantConversation(userId, chatId) {
+  const chat = await retryOnSqliteTimeout(() =>
+    prisma.chat.findFirst({
+      where: { id: chatId, userId },
+      include: { contact: true },
+    }),
+  );
+
+  if (!chat) {
+    throw new Error("Chat not found.");
+  }
+
+  const externalId = chat.contact?.externalId || null;
+  const isAssistant =
+    externalId &&
+    (externalId === "openwa:assistant" ||
+      String(externalId).startsWith("openwa:assistant") ||
+      String(externalId).endsWith(":assistant"));
+
+  if (!isAssistant) {
+    throw new Error("Not an assistant conversation.");
+  }
+
+  if (externalId === "openwa:assistant") {
+    throw new Error("Cannot delete the default assistant conversation.");
+  }
+
+  // Deleting the contact cascades to its chats and messages.
+  await retryOnSqliteTimeout(() =>
+    prisma.contact.delete({
+      where: { id: chat.contactId },
+    }),
+  );
+
+  return { ok: true };
+}
+
+async function deleteChat(userId, chatId) {
+  const chat = await retryOnSqliteTimeout(() =>
+    prisma.chat.findFirst({
+      where: { id: chatId, userId },
+      include: { contact: true },
+    }),
+  );
+
+  if (!chat) {
+    throw new Error("Chat not found.");
+  }
+
+  // Delete the chat (this will cascade-delete messages)
+  await retryOnSqliteTimeout(() =>
+    prisma.chat.delete({ where: { id: chat.id } }),
+  );
+
+  // Clear contact preview to reflect deleted chat
+  await retryOnSqliteTimeout(() =>
+    prisma.contact.update({
+      where: { id: chat.contactId },
+      data: { lastMessagePreview: null, lastMessageAt: null, unreadCount: 0 },
+    }),
+  );
+
+  return { ok: true };
+}
+
 module.exports = {
   addMessageStatus,
   createMediaFile,
   createOutgoingMessage,
   createSessionCompanionChat,
   createAssistantConversation,
+  deleteAssistantConversation,
+  deleteChat,
   deleteMessage,
   ensureWelcomeWorkspace,
   forwardMessage,

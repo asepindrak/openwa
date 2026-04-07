@@ -71,6 +71,17 @@ function recentChatTimestamp(chat) {
 
 function sortChats(chats) {
   return [...chats].sort((left, right) => {
+    // Pinned chats first (newest pinned first)
+    const leftPinned = left.pinnedAt ? new Date(left.pinnedAt) : null;
+    const rightPinned = right.pinnedAt ? new Date(right.pinnedAt) : null;
+
+    if (leftPinned && rightPinned) {
+      return rightPinned - leftPinned;
+    }
+
+    if (leftPinned) return -1;
+    if (rightPinned) return 1;
+
     const leftRecent = recentChatTimestamp(left);
     const rightRecent = recentChatTimestamp(right);
 
@@ -78,13 +89,8 @@ function sortChats(chats) {
       return new Date(rightRecent) - new Date(leftRecent);
     }
 
-    if (rightRecent) {
-      return 1;
-    }
-
-    if (leftRecent) {
-      return -1;
-    }
+    if (rightRecent) return 1;
+    if (leftRecent) return -1;
 
     return new Date(right.updatedAt) - new Date(left.updatedAt);
   });

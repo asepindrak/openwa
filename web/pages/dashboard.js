@@ -382,6 +382,32 @@ export default function DashboardPage() {
     }
   };
 
+  const handleDeleteChat = async (chatId) => {
+    setError("");
+    try {
+      if (!token) return;
+      const chat = chats.find((c) => c.id === chatId);
+      const externalId = chat?.contact?.externalId || null;
+      const isAssistant =
+        externalId &&
+        (externalId === "openwa:assistant" ||
+          String(externalId).startsWith("openwa:assistant") ||
+          String(externalId).endsWith(":assistant"));
+
+      const endpoint = isAssistant
+        ? `/api/assistant/sessions/${chatId}`
+        : `/api/chats/${chatId}`;
+
+      await apiFetch(endpoint, { method: "DELETE", token });
+      await loadWorkspace(true);
+      if (activeChatId === chatId) {
+        setActiveChat(null);
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  };
+
   const handleConnectSession = async (sessionId) => {
     setError("");
     setConnectLoading(sessionId);
@@ -723,6 +749,8 @@ export default function DashboardPage() {
               currentUser={user}
               query={chatQuery}
               onQueryChange={setChatQuery}
+              onTogglePin={handleTogglePin}
+              onDeleteChat={handleDeleteChat}
             />
           </aside>
 

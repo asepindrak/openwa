@@ -400,6 +400,25 @@ function createApp({ config, sessionManager }) {
     }),
   );
 
+  // Delete an Assistant conversation (only non-default assistant instances)
+  app.delete(
+    "/api/assistant/sessions/:chatId",
+    requireAuth,
+    withAsync(async (req, res) => {
+      try {
+        await chatService.deleteAssistantConversation(
+          req.user.id,
+          req.params.chatId,
+        );
+        res.json({ ok: true });
+      } catch (error) {
+        res.status(error?.code === "P1008" ? 503 : 400).json({
+          error: error?.message,
+        });
+      }
+    }),
+  );
+
   app.put(
     "/api/assistant",
     requireDashboardAuth,
@@ -907,6 +926,21 @@ function createApp({ config, sessionManager }) {
       });
     }
   });
+
+  app.delete(
+    "/api/chats/:chatId",
+    requireAuth,
+    withAsync(async (req, res) => {
+      try {
+        await chatService.deleteChat(req.user.id, req.params.chatId);
+        res.json({ ok: true });
+      } catch (error) {
+        res.status(error?.code === "P1008" ? 503 : 400).json({
+          error: error?.message,
+        });
+      }
+    }),
+  );
 
   app.get(
     "/api/contacts",
