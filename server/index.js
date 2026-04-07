@@ -3,7 +3,6 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 const { createServer } = require("http");
 const next = require("next");
-const openModule = require("open");
 const { Server } = require("socket.io");
 const { getConfig } = require("./config");
 const { initializeDatabase } = require("./database/init");
@@ -13,7 +12,6 @@ const sessionService = require("./services/session-service");
 const { registerSocketHandlers, userRoom } = require("./socket/register");
 const { ensureRuntimeDirs, webDir } = require("./utils/paths");
 const { SessionManager } = require("./whatsapp/session-manager");
-const openBrowser = openModule.default || openModule;
 function shouldProxyToBackend(req) {
   const url = new URL(req.url || "/", "http://localhost");
   return (
@@ -78,6 +76,10 @@ function ensureWebBuild(config) {
 }
 
 async function startOpenWA({ dev = false } = {}) {
+  // Dynamic import for ESM module
+  const openModule = await import("open");
+  const openBrowser = openModule.default || openModule;
+
   const config = getConfig({ dev });
   process.env.NEXT_PUBLIC_API_URL = config.backendUrl;
   process.env.NEXT_PUBLIC_SOCKET_URL = config.backendUrl;
