@@ -26,6 +26,8 @@ If you use OpenWA with WhatsApp, make sure your usage complies with the terms, p
 - Dual authentication model:
   - JWT bearer auth for dashboard users.
   - API key auth for agents and external integrations.
+- **Built-in AI Assistant** with extensible tool capabilities.
+- **Agent-friendly architecture** with machine-readable documentation and tool registration.
 
 ## Tech stack
 
@@ -81,22 +83,39 @@ Important runtime endpoints such as docs, health, and version are also proxied t
 OpenWA reads `.env` from the repository root. These are the runtime variables currently used by the app:
 
 ```env
+# Server and Frontend
 HOST=127.0.0.1
 FE_PORT=55111
 BE_PORT=55222
 OPENWA_FRONTEND_URL=http://localhost:55111
 OPENWA_BACKEND_URL=http://localhost:55222
 OPENWA_JWT_SECRET=openwa-local-dev-secret
+
+# Startup behavior
 OPENWA_AUTO_OPEN=true
+
+# WhatsApp adapter
 OPENWA_USE_WWEBJS=true
 OPENWA_ALLOW_MOCK=false
+
+# Assistant and Agent Configuration (Optional)
+OPENWA_LLM_PROVIDER=openai
+OPENWA_OPENAI_API_KEY=sk-...
+OPENWA_ANTHROPIC_API_KEY=...
+OPENWA_OLLAMA_ENDPOINT=http://localhost:11434
+
+# Terminal execution security
+OPENWA_TERMINAL_ALLOWLIST=npm run build npm test node --version
 ```
 
-Notes:
+### Configuration Notes
 
 - Set `OPENWA_AUTO_OPEN=false` to disable automatic browser opening.
 - Set `OPENWA_USE_WWEBJS=false` to disable the WhatsApp Web adapter.
-- Set `OPENWA_ALLOW_MOCK=true` to allow the mock adapter when needed.
+- Set `OPENWA_ALLOW_MOCK=true` to allow the mock adapter for testing.
+- `OPENWA_LLM_PROVIDER` specifies the default LLM for assistant operations (openai, anthropic, ollama, openrouter).
+- `OPENWA_TERMINAL_ALLOWLIST` restricts which terminal commands can auto-execute without manual approval (space-separated patterns).
+- Terminal commands are only auto-executed if `approvalMode` is `auto` and the command matches an allowlist entry or user settings allow it.
 
 ## Typical usage flow
 
@@ -109,20 +128,125 @@ Notes:
 7. Send text or media from the dashboard or the HTTP API.
 8. Create an API key from **Settings → API Access** for agents or external integrations.
 
+## AI Assistant Capabilities
+
+OpenWA includes a built-in AI assistant that can manage WhatsApp sessions, LLM configurations, and extend functionality via registered tools. The assistant is accessible via WebSocket for real-time chat in the dashboard and via HTTP API for programmatic access.
+
+### Default Assistant Tools
+
+The assistant comes with these built-in skills:
+
+- **`add_device`** — Create and manage new WhatsApp session/device for the workspace.
+- **`add_llm_provider`** — Configure LLM providers (OpenAI, Anthropic, Ollama, OpenRouter).
+- **`update_assistant`** — Customize the assistant's display name, avatar, and personality.
+- **`create_api_key`** — Generate API keys for external integrations.
+- **`update_webhook`** — Configure incoming webhook URL and authentication key.
+- **`update_tools_md`** — Register and document new external tools.
+- **`get_webpage`** — Fetch and parse webpage content (with fallback to browser rendering).
+- **`open_browser`** — Launch headless browser for dynamic content extraction.
+- **`list_workspaces`** — Enumerate project folders in the workspaces directory.
+- **`run_terminal`** — Execute shell commands with approval control.
+- **`search_messages`** — Query WhatsApp message database and attachments.
+- **`run_code_agent`** — Invoke the internal coding agent for file and project automation.
+
+### Registering External Tools
+
+You can extend the assistant with custom tools by registering a tool manifest URL:
+
+**Via cURL:**
+
+```bash
+curl -X POST 'http://localhost:55111/api/agent/register-tool-url' \
+  -H 'Authorization: Bearer <DASHBOARD_JWT>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "url": "https://example.com/manifest.json",
+    "apiKey": "<MANIFEST_API_KEY>",
+    "headerName": "Authorization",
+    "overwrite": true
+  }'
+```
+
+**PowerShell:**
+
+```powershell
+Invoke-RestMethod -Method Post -Uri 'http://localhost:55111/api/agent/register-tool-url' `
+  -Headers @{"Authorization"="Bearer <DASHBOARD_JWT>";"Content-Type"="application/json"} `
+  -Body '{"url":"https://example.com/manifest.json","apiKey":"<MANIFEST_API_KEY>","overwrite":true}'
+```
+
+### Invoking Tools via API
+
+Once a tool is registered, invoke it with either a user JWT or an API key:
+
+**Using API Key:**
+
+```bash
+curl -X POST 'http://localhost:55111/api/agent/invoke-tool/<tool_id>' \
+  -H 'X-API-Key: <API_KEY>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "method": "GET",
+    "path": "/endpoint"
+  }'
+```
+
+**Using JWT:**
+
+```bash
+curl -X POST 'http://localhost:55111/api/agent/invoke-tool/<tool_id>' \
+  -H 'Authorization: Bearer <USER_JWT>' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "method": "POST",
+    "path": "/action",
+    "body": { "param": "value" }
+  }'
+```
+
+### Tool Registration Security
+
+- **Dashboard-only registration**: Tool registration requires a valid dashboard JWT.
+- **Invocation control**: Each tool has an `invokeEnabled` flag determining if non-owner users can call it.
+- **Approval modes**: Terminal execution supports `auto` (trusted allowlist) and `manual` (requires approval).
+- **Terminal allowlist**: Set `OPENWA_TERMINAL_ALLOWLIST` environment variable to restrict auto-executable commands.
+- **Audit logging**: All tool invocations are logged for accountability.
+
+### Assistant Configuration
+
+Configure assistant behavior via environment variables:
+
+```env
+# Terminal command allowlist for auto-execution (space-separated patterns)
+OPENWA_TERMINAL_ALLOWLIST="npm run build npm test node --version"
+
+# LLM provider settings
+OPENWA_LLM_PROVIDER=openai
+OPENWA_OPENAI_API_KEY=sk-...
+```
+
 ## Runtime documentation
 
-OpenWA exposes runtime documentation directly from the app:
+OpenWA exposes comprehensive runtime documentation for both users and AI agents:
 
-- Swagger UI: `GET /docs`
-- OpenAPI JSON: `GET /docs/json`
-- Agent guide markdown: `GET /docs/readme`
-- Health check: `GET /health`
-- Version: `GET /version`
-- Backend health alias: `GET /api/health`
+- **Swagger UI**: `GET /docs` — Interactive API explorer with try-it-out functionality.
+- **OpenAPI JSON**: `GET /docs/json` — Machine-readable API schema for code generation and integrations.
+- **Agent guide markdown**: `GET /docs/readme` — Markdown documentation for AI agents and automation tools.
+- **Health check**: `GET /health` — Service availability status.
+- **Version**: `GET /version` — Runtime version and component info.
+- **Backend health alias**: `GET /api/health` — Direct backend health endpoint.
 
-If you are building an agent or automation client, prefer the frontend URL as the base URL because the main runtime metadata endpoints are already proxied there.
+### AI-Agent Discovery
 
-This makes OpenWA a strong fit for AI agents: an agent can read `/docs/readme`, fetch `/docs/json`, authenticate with an API key, and immediately start working with chats, contacts, sessions, and messages through a documented API surface.
+This architecture is designed for AI agents and automation platforms:
+
+1. An agent reads `/docs/readme` to understand available operations.
+2. The agent fetches `/docs/json` to understand request/response schemas.
+3. The agent creates an API key from the dashboard (or requests one programmatically).
+4. The agent authenticates with the API key header and immediately starts interacting with chats, contacts, sessions, and messages.
+5. The agent can discover and register additional external tools via the `/api/agent/register-tool-url` endpoint.
+
+This makes OpenWA a strong fit for AI agents: full API documentation, extensible tool registration, and secure authentication without reverse-engineering the app.
 
 ## API summary
 
@@ -208,7 +332,25 @@ Authorization: Bearer <api-key>
 
 Recommended for agents, automation, and external integrations.
 
-## API examples
+## Agent and Tool APIs
+
+### Tool Management
+
+- `POST /api/agent/register-tool-url` — Register a new tool from a manifest URL (dashboard JWT required).
+- `GET /api/agent/tools` — List all registered tools.
+- `POST /api/agent/invoke-tool/{toolId}` — Invoke a registered tool with method, path, and optional body.
+
+### Assistant APIs
+
+- `POST /api/chat/{chatId}/messages` — Send a message to an assistant conversation.
+- `GET /api/agent/docs/readme` — Fetch agent-friendly documentation.
+- `GET /api/agent/docs/json` — Fetch OpenAPI specification in JSON format.
+
+These endpoints support both JWT and API key authentication.
+
+## API Examples
+
+### WhatsApp Operations
 
 List chats:
 
@@ -239,13 +381,62 @@ curl -X POST http://localhost:55111/api/media \
   -F "file=@./example.png"
 ```
 
-## Project structure
+Search messages:
+
+```bash
+curl -H "X-API-Key: <api-key>" \
+  "http://localhost:55111/api/search-messages?q=invoice&chatId=12345@c.us&limit=20"
+```
+
+### Agent Discovery and Configuration
+
+Fetch agent readme:
+
+```bash
+curl -H "X-API-Key: <api-key>" http://localhost:55111/api/agent/docs/readme
+```
+
+Fetch OpenAPI specification:
+
+```bash
+curl -H "X-API-Key: <api-key>" http://localhost:55111/api/agent/docs/json
+```
+
+List all registered tools:
+
+```bash
+curl -H "X-API-Key: <api-key>" http://localhost:55111/api/agent/tools
+```
+
+### Tool Invocation Example
+
+Invoke a registered external tool:
+
+```bash
+curl -X POST http://localhost:55111/api/agent/invoke-tool/weather-api \
+  -H "X-API-Key: <api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"method":"GET","path":"/forecast?city=London"}'
+```
+
+## Project Structure
 
 - `bin/` - CLI entrypoint
 - `server/` - backend runtime, OpenAPI docs, auth, sessions, chats, media, and sockets
-- `web/` - Next.js dashboard
-- `prisma/` - database schema
-- `storage/` - runtime storage and generated files
+  - `server/express/` - Express middleware and route handlers
+  - `server/services/` - Business logic including agent orchestration, tool execution, and assistant management
+  - `server/ai/llm-adapters/` - LLM provider adapters (OpenAI, Anthropic, etc.)
+- `web/` - Next.js dashboard UI
+- `prisma/` - Database schema and migrations
+- `storage/` - Runtime storage, sessions, media files, and database
+
+### Key Assistant Services
+
+- `server/services/agent-orchestrator.js` - Orchestrates agent workflow and tool execution.
+- `server/services/agent-service.js` - Handles assistant chat messages and tool invocation.
+- `server/services/tool-executor.js` - Executes assistant tools and external integrations.
+- `server/services/llm-service.js` - LLM provider abstraction and model selection.
+- `server/services/assistant-service.js` - Manages assistant profiles and configurations.
 
 ## Development
 
