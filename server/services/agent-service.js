@@ -641,6 +641,9 @@ function buildAssistantSystemPrompt({
   parts.push(
     "- If you include prose, wrap the tool-call JSON in a JSON code block (for example, a triple-backtick fence with the language set to 'json').",
   );
+  parts.push(
+    "- Respond in the same language as the user's message. If unsure, default to English.",
+  );
   parts.push("");
   parts.push("Strategy & Autonomy:");
   parts.push(
@@ -659,7 +662,7 @@ function buildAssistantSystemPrompt({
     "5. Iteration: Analyze tool results. If a command fails, describe why in prose and try a different approach.",
   );
   parts.push(
-    "6. WhatsApp Automation: When adding a new device with 'add_device', the tool will automatically handle session connection, QR code generation, and wait for the user to scan. You do not need to instruct the user to go to settings or manually wait; the tool will provide the QR code in the chat automatically.",
+    "6. WhatsApp Automation: When adding a new device with 'add_device', the tool will automatically handle session connection, QR code generation, and wait for the user to scan. Once the tool returns successfully, the device is ALREADY connected and sync is complete. You MUST NOT ask the user to connect or scan again. Simply confirm the connection and ask what to do next.",
   );
   parts.push("");
   parts.push(`Available tools: ${toolsList}.`);
@@ -881,25 +884,52 @@ const tools = {
     const { sessionManager, io, chatId } = ctx || {};
     if (!sessionManager) throw new Error("sessionManager not found in context");
 
+    // Check if a session with the same name already exists for this user
+    const existingSessions = await sessionService.listUserSessions(userId);
+    const existing = existingSessions.find(
+      (s) => s.name.toLowerCase() === name.toLowerCase(),
+    );
+
+    let session;
+    if (existing) {
+      // If it exists and is already ready or connecting, just reuse it
+      if (existing.status === "ready" || existing.status === "connecting") {
+        return {
+          ok: true,
+          session: existing,
+          status: existing.status,
+          summary: `WhatsApp device "${name}" is already ${existing.status}. No need to create a new one.`,
+        };
+      }
+      session = existing;
+    } else {
+      session = await sessionService.createUserSession(userId, {
+        name,
+        phoneNumber: phoneNumber || null,
+      });
+    }
+
     const assistantSender = "openwa:assistant";
     const assistantDisplayName = "OpenWA Assistant";
 
-    const session = await sessionService.createUserSession(userId, {
-      name,
-      phoneNumber: phoneNumber || null,
-    });
-
-    try {
-      await chatService.createSessionCompanionChat(userId, session);
-    } catch (e) {
-      // ignore companion chat errors
+    // Only create a companion chat if we're not already in an assistant chat,
+    // or if the user specifically requested it (though currently we just default to not
+    // spamming new chats if we have a chatId).
+    if (!chatId) {
+      try {
+        await chatService.createSessionCompanionChat(userId, session);
+      } catch (e) {
+        // ignore companion chat errors
+      }
     }
 
     return new Promise(async (resolve, reject) => {
       let qrSent = false;
+      let syncFinished = false;
       const timeoutSeconds = 180;
       const timeout = setTimeout(() => {
         sessionManager.removeListener("session-status", onStatus);
+        sessionManager.removeListener("workspace-sync", onSync);
         resolve({
           ok: false,
           error:
@@ -907,6 +937,12 @@ const tools = {
           session,
         });
       }, timeoutSeconds * 1000);
+
+      const onSync = (payload) => {
+        if (payload.sessionId === session.id) {
+          syncFinished = true;
+        }
+      };
 
       const onStatus = async (payload) => {
         if (payload.sessionId !== session.id) return;
@@ -954,26 +990,50 @@ const tools = {
         }
 
         if (payload.status === "ready") {
+          // If there's a lastError (like sync failed), we should still report success but mention the error
+          const hasSyncError =
+            payload.lastError && payload.lastError.includes("sync failed");
+
+          // Wait a bit for sync to finish if it hasn't yet, or just proceed
+          // since SessionManager handles sync asynchronously.
+          // But to be sure, we can wait up to 10 seconds for the sync event.
+          let syncWaitCount = 0;
+          while (!syncFinished && syncWaitCount < 20 && !hasSyncError) {
+            await new Promise((r) => setTimeout(r, 500));
+            syncWaitCount++;
+          }
+
           clearTimeout(timeout);
           sessionManager.removeListener("session-status", onStatus);
+          sessionManager.removeListener("workspace-sync", onSync);
 
           if (chatId) {
+            const successMsg = hasSyncError
+              ? `✅ WhatsApp device "${name}" is connected, but I encountered a temporary issue syncing your old chats. Your new messages will still work perfectly!`
+              : `✅ WhatsApp device "${name}" is now connected and ready! I have fetched your recent chats and contacts.`;
+
             await sendAssistantMessage(
               userId,
               assistantSender,
               assistantDisplayName,
-              `✅ WhatsApp device "${name}" is now connected and ready!`,
+              successMsg,
               io,
               chatId,
             );
           }
 
-          resolve({ ok: true, session, status: "ready" });
+          resolve({
+            ok: true,
+            session,
+            status: "ready",
+            summary: `WhatsApp device "${name}" is now fully connected. ${hasSyncError ? "Initial sync had some issues but connection is active." : "User has already scanned the QR code."} You do NOT need to ask for connection again.`,
+          });
         }
 
         if (payload.status === "error") {
           clearTimeout(timeout);
           sessionManager.removeListener("session-status", onStatus);
+          sessionManager.removeListener("workspace-sync", onSync);
           resolve({
             ok: false,
             error: payload.lastError || "Failed to connect WhatsApp session.",
@@ -983,6 +1043,7 @@ const tools = {
       };
 
       sessionManager.on("session-status", onStatus);
+      sessionManager.on("workspace-sync", onSync);
 
       try {
         await sessionManager.connectSession(userId, session.id, {

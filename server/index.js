@@ -156,6 +156,10 @@ async function startOpenWA({ dev = false } = {}) {
     }
   });
 
+  sessionManager.on("workspace-sync-started", (payload) => {
+    io.to(userRoom(payload.userId)).emit("workspace_sync_started", payload);
+  });
+
   sessionManager.on("workspace-sync", (payload) => {
     io.to(userRoom(payload.userId)).emit("workspace_synced", payload);
   });

@@ -42,6 +42,8 @@ export default function DashboardPage() {
 
   const [loading, setLoading] = useState(true);
   const [contactsLoading, setContactsLoading] = useState(false);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [syncingWorkspace, setSyncingWorkspace] = useState(false);
   const [error, setError] = useState("");
   const [sessionName, setSessionName] = useState("");
   const [sessionPhone, setSessionPhone] = useState("");
@@ -49,7 +51,6 @@ export default function DashboardPage() {
   const [contactQuery, setContactQuery] = useState("");
   const [messageQuery, setMessageQuery] = useState("");
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [messagesLoading, setMessagesLoading] = useState(false);
   const [contacts, setContacts] = useState([]);
   const [apiKeys, setApiKeys] = useState([]);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
@@ -138,6 +139,39 @@ export default function DashboardPage() {
     [logout, router, setBootstrapData, token],
   );
 
+  const pollSessionStatus = useCallback(
+    async (sessionId) => {
+      const deadline = Date.now() + 25000;
+
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        if (!token) return null;
+
+        try {
+          const data = await apiFetch("/api/sessions", { token });
+          const session = data.sessions?.find((item) => item.id === sessionId);
+          if (!session) continue;
+
+          upsertSession(session);
+
+          if (
+            session.qrCode ||
+            session.status === "ready" ||
+            session.status === "error" ||
+            session.status === "disconnected"
+          ) {
+            return session;
+          }
+        } catch (err) {
+          // ignore poll errors and retry until timeout
+        }
+      }
+
+      return null;
+    },
+    [token, upsertSession],
+  );
+
   useEffect(() => {
     hydrateAuth();
   }, [hydrateAuth]);
@@ -203,6 +237,26 @@ export default function DashboardPage() {
 
     socketClient.on("session_status_update", (session) => {
       upsertSession(session);
+
+      // Only clear connect loading state when it's fully ready, or has an error/disconnected
+      if (
+        session.status === "ready" ||
+        session.status === "error" ||
+        session.status === "disconnected"
+      ) {
+        setConnectLoading(null);
+      }
+
+      // Stop QR loading once we have a QR or the session becomes ready/error/disconnected
+      if (
+        session.qrCode ||
+        session.status === "ready" ||
+        session.status === "error" ||
+        session.status === "disconnected"
+      ) {
+        setQrLoading(false);
+      }
+
       // If session is connecting, show sync indicator; when ready, refresh workspace
       if (session.status === "connecting") {
         setContactsLoading(true);
@@ -215,12 +269,38 @@ export default function DashboardPage() {
       }
     });
 
-    socketClient.on("workspace_synced", () => {
+    socketClient.on("workspace_sync_started", (payload) => {
+      console.log("[Dashboard] Workspace sync started:", payload);
+      setContactsLoading(true);
+      setMessagesLoading(true);
+      setSyncingWorkspace(true);
+    });
+
+    socketClient.on("workspace_synced", (payload) => {
+      console.log("[Dashboard] Workspace synced event received:", payload);
       // backend finished workspace sync
       loadWorkspace();
       loadContacts();
       setContactsLoading(false);
       setMessagesLoading(false);
+      setSyncingWorkspace(false);
+
+      if (payload.status === "failed") {
+        setError(payload.error || "WhatsApp sync failed.");
+      }
+
+      // Refresh current chat messages if it's a WhatsApp chat
+      const state = useAppStore.getState();
+      if (state.activeChatId) {
+        apiFetch(`/api/chats/${state.activeChatId}/messages`, { token })
+          .then((data) => {
+            setMessages(state.activeChatId, data.messages, {
+              hasMore: Boolean(data.hasMore),
+              nextBefore: data.nextBefore || null,
+            });
+          })
+          .catch(() => {});
+      }
     });
 
     socketClient.on("typing_event", (payload) => {
@@ -412,18 +492,23 @@ export default function DashboardPage() {
     setError("");
     setConnectLoading(sessionId);
     setQrLoading(true);
+    setActiveSession(sessionId);
+
     try {
       const data = await apiFetch(`/api/sessions/${sessionId}/connect`, {
         method: "POST",
         token,
       });
       upsertSession(data.session);
-      setActiveSession(sessionId);
+
+      const session = await pollSessionStatus(sessionId);
+      if (!session) {
+        setQrLoading(false);
+      }
     } catch (requestError) {
       setError(requestError.message);
-    } finally {
-      setConnectLoading(null);
-      setTimeout(() => setQrLoading(false), 1200); // beri waktu QR muncul
+      setConnectLoading(null); // Clear loading state if request failed
+      setQrLoading(false);
     }
   };
 
@@ -717,16 +802,20 @@ export default function DashboardPage() {
       />
 
       {/* Global small loading badge for slow WA syncs */}
-      {contactsLoading || messagesLoading || loading ? (
-        <div className="fixed right-4 top-4 z-50 flex items-center gap-2 rounded-md bg-black/60 px-3 py-2 text-sm text-white">
-          <span className="h-2 w-2 animate-pulse rounded-full bg-white/80" />
-          <span>
-            {loading
-              ? "Refreshing workspace..."
-              : contactsLoading
-                ? "Syncing contacts..."
-                : "Fetching messages..."}
+      {syncingWorkspace || contactsLoading || messagesLoading || loading ? (
+        <div className="fixed left-4 bottom-4 z-50 flex items-center gap-3 rounded-[24px] bg-brand-600/95 px-4 py-3 text-sm font-semibold text-white shadow-[0_20px_60px_rgba(0,0,0,0.35)] ring-1 ring-brand-200/30">
+          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-white/15">
+            <span className="h-2 w-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
           </span>
+          <div className="min-w-[220px] leading-5">
+            {syncingWorkspace
+              ? "Syncing WhatsApp chats and contacts..."
+              : loading
+                ? "Refreshing workspace..."
+                : contactsLoading
+                  ? "Syncing WhatsApp data..."
+                  : "Fetching messages..."}
+          </div>
         </div>
       ) : null}
 
@@ -815,6 +904,7 @@ export default function DashboardPage() {
         onDeleteSession={handleDeleteSession}
         connectLoading={connectLoading}
         qrLoading={qrLoading}
+        syncingWorkspace={syncingWorkspace}
         sessionName={sessionName}
         sessionPhone={sessionPhone}
         onSessionNameChange={setSessionName}

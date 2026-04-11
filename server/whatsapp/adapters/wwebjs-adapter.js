@@ -2,12 +2,16 @@ const EventEmitter = require("events");
 const QRCode = require("qrcode");
 const fs = require("fs");
 const path = require("path");
+const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
+const { v4: uuidv4 } = require("uuid");
 const {
   sessionsDir,
   storageDir,
   mediaDir,
   ensureRuntimeDirs,
 } = require("../../utils/paths");
+const { prisma } = require("../../database/client");
+const { storeIncomingMessage } = require("../../services/chat-service");
 
 function resolveStoredMediaPath(relativePath) {
   const normalized = String(relativePath || "")
@@ -42,88 +46,36 @@ class WwebjsAdapter extends EventEmitter {
       };
     }
 
-    const result = await this.client.pupPage.evaluate(async (contactId) => {
-      try {
-        const chatWid = window.Store.WidFactory.createWid(contactId);
-        let profilePic = null;
+    try {
+      // Use official API instead of low-level evaluate
+      const profilePicUrl = await this.client.getProfilePicUrl(externalId);
 
-        if (typeof window.Store.ProfilePic.profilePicFind === "function") {
-          profilePic = await window.Store.ProfilePic.profilePicFind(chatWid);
-        }
-
-        if (
-          !profilePic &&
-          typeof window.Store.ProfilePic.requestProfilePicFromServer ===
-            "function"
-        ) {
-          profilePic =
-            await window.Store.ProfilePic.requestProfilePicFromServer(chatWid);
-        }
-
-        return (
-          profilePic?.eurl || profilePic?.imgFull || profilePic?.img || null
-        );
-      } catch (error) {
-        const message = String(error?.message || error || "");
-        if (message.includes("isNewsletter")) {
-          return {
-            __status: "newsletter-guard",
-          };
-        }
-
-        if (error?.name === "ServerStatusCodeError") {
-          return {
-            __status: "server-status",
-          };
-        }
-
+      if (!profilePicUrl) {
         return {
-          __error: {
-            name: String(error?.name || "Error"),
-            message,
-          },
+          url: null,
+          status: "missing",
+          reason: "no-profile-photo-returned",
         };
       }
-    }, externalId);
 
-    if (result?.__error) {
+      return {
+        url: profilePicUrl,
+        status: "found",
+        reason: "profile-photo-found",
+      };
+    } catch (error) {
+      const message = String(error?.message || error || "");
+      console.warn(
+        `[WwebjsAdapter] resolveProfilePic failed for ${externalId}:`,
+        message,
+      );
+
       return {
         url: null,
         status: "error",
-        reason: result.__error.message,
-        errorName: result.__error.name,
+        reason: message,
       };
     }
-
-    if (result?.__status === "newsletter-guard") {
-      return {
-        url: null,
-        status: "newsletterGuard",
-        reason: "wwebjs-newsletter-guard",
-      };
-    }
-
-    if (result?.__status === "server-status") {
-      return {
-        url: null,
-        status: "serverStatus",
-        reason: "server-status-code-error",
-      };
-    }
-
-    if (!result) {
-      return {
-        url: null,
-        status: "missing",
-        reason: "no-profile-photo-returned",
-      };
-    }
-
-    return {
-      url: result,
-      status: "found",
-      reason: "profile-photo-found",
-    };
   }
 
   async resolveProfilePicUrl(externalId) {
@@ -138,8 +90,6 @@ class WwebjsAdapter extends EventEmitter {
   }
 
   async connect() {
-    const { Client, LocalAuth } = require("whatsapp-web.js");
-
     try {
       ensureRuntimeDirs();
     } catch (e) {}
@@ -153,7 +103,7 @@ class WwebjsAdapter extends EventEmitter {
         headless: true,
         // Increase protocolTimeout to avoid Runtime.callFunctionOn timed out errors
         // when WhatsApp/puppeteer operations take longer on slow machines.
-        protocolTimeout: 120000,
+        protocolTimeout: 300000,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
         timeout: 0,
       },
@@ -169,7 +119,12 @@ class WwebjsAdapter extends EventEmitter {
     });
 
     this.client.on("ready", () => {
-      this.emit("status", { status: "ready", transportType: "wwebjs" });
+      const phoneNumber = this.client.info?.wid?.user || null;
+      this.emit("status", {
+        status: "ready",
+        transportType: "wwebjs",
+        phoneNumber,
+      });
     });
 
     this.client.on("disconnected", (reason) => {
@@ -187,12 +142,6 @@ class WwebjsAdapter extends EventEmitter {
         lastError: message,
       });
     });
-
-    const { v4: uuidv4 } = require("uuid");
-    const { storeIncomingMessage } = require("../../services/chat-service");
-    const { prisma } = require("../../database/client");
-    // use mediaDir from paths so it's stored in the user data dir
-    // (imported at top of file)
 
     this.client.on("message", (message) => {
       void (async () => {
@@ -269,23 +218,79 @@ class WwebjsAdapter extends EventEmitter {
       throw new Error("WhatsApp client is not ready.");
     }
 
-    const [contacts, chats] = await Promise.all([
-      this.client.getContacts(),
-      this.client.getChats(),
-    ]);
+    // Wait for the client to be fully ready and for internal data to settle
+    // whatsapp-web.js sometimes fires 'ready' but data isn't fully accessible
+    await new Promise((resolve) => setTimeout(resolve, 10000));
+
+    let contacts = [];
+    let chats = [];
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (retryCount < maxRetries) {
+      try {
+        console.log(
+          `[WwebjsAdapter] Syncing chats and contacts (attempt ${retryCount + 1})...`,
+        );
+
+        // Use official API methods
+        contacts = await this.client.getContacts();
+        chats = await this.client.getChats();
+
+        if (chats && chats.length > 0) {
+          console.log(
+            `[WwebjsAdapter] Found ${chats.length} chats and ${contacts.length} contacts.`,
+          );
+          break;
+        }
+
+        throw new Error(
+          "No chats found yet (WhatsApp might still be loading data).",
+        );
+      } catch (err) {
+        retryCount++;
+        const message = err.message || String(err);
+
+        if (retryCount >= maxRetries) {
+          console.error("[WwebjsAdapter] Sync failed after retries:", message);
+          // Return empty to avoid crashing the whole session manager
+          return { contacts: [], chats: [] };
+        }
+
+        console.warn(
+          `[WwebjsAdapter] Sync attempt ${retryCount} failed: ${message}. Retrying in 5s...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+    }
+
+    // Limit chats to sync to avoid blocking the event loop for too long
+    // Sort by timestamp if possible, or just take the first N
+    const recentChats = chats
+      .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+      .slice(0, 40);
+
     const contactSnapshots = await Promise.all(
-      contacts.map(async (contact) => {
+      contacts.slice(0, 100).map(async (contact) => {
         const externalId = contact.id?._serialized || "";
-        const avatarResult = await this.resolveProfilePic(externalId);
+        // Only fetch profile pic for some contacts to save time
+        let avatarUrl = null;
+        try {
+          const avatarResult = await this.resolveProfilePic(externalId);
+          avatarUrl = avatarResult.url;
+        } catch (e) {
+          // ignore
+        }
 
         return {
           externalId,
           name: contact.name || contact.shortName || "",
           pushname: contact.pushname || contact.name || "",
-          avatarUrl: avatarResult.url,
+          avatarUrl,
         };
       }),
     );
+
     const contactAvatarMap = new Map(
       contactSnapshots.map((contact) => [
         contact.externalId,
@@ -294,40 +299,69 @@ class WwebjsAdapter extends EventEmitter {
     );
     const chatSnapshots = [];
 
-    for (const chat of chats) {
-      const externalId = chat.id?._serialized || "";
+    for (const chat of recentChats) {
+      const externalId = chat?.id?._serialized || "";
+      if (!externalId) {
+        continue;
+      }
+
       if (!externalId.endsWith("@c.us") && !externalId.endsWith("@g.us")) {
         continue;
       }
 
-      const messages = await chat.fetchMessages({ limit: 50 });
-      const chatAvatarResult = contactAvatarMap.get(externalId)
-        ? {
-            url: contactAvatarMap.get(externalId),
-            status: "found",
-            reason: "reused-contact-avatar",
-          }
-        : await this.resolveProfilePic(externalId);
+      if (typeof chat.fetchMessages !== "function") {
+        console.warn(
+          `[WwebjsAdapter] Skipping chat without fetchMessages support: ${externalId}`,
+        );
+        continue;
+      }
 
-      chatSnapshots.push({
-        externalId,
-        name: chat.name || chat.formattedTitle || externalId,
-        pushname: chat.name || chat.formattedTitle || externalId,
-        avatarUrl: chatAvatarResult.url,
-        messages: messages.map((message) => ({
-          externalMessageId: message.id?._serialized || null,
-          sender: message.fromMe
-            ? `user:${this.session.userId}`
-            : message.author || message.from || externalId,
-          body: message.body || null,
-          type: message.type,
-          direction: message.fromMe ? "outbound" : "inbound",
-          ack: message.ack ?? 0,
-          createdAt: new Date(
-            (message.timestamp || Math.floor(Date.now() / 1000)) * 1000,
-          ).toISOString(),
-        })),
-      });
+      try {
+        let messages = [];
+        try {
+          messages = await chat.fetchMessages({ limit: 20 });
+        } catch (err) {
+          console.warn(
+            `[WwebjsAdapter] Failed to fetch messages for ${externalId}:`,
+            err?.message || err,
+          );
+        }
+
+        const chatAvatarResult = contactAvatarMap.get(externalId)
+          ? {
+              url: contactAvatarMap.get(externalId),
+              status: "found",
+              reason: "reused-contact-avatar",
+            }
+          : await this.resolveProfilePic(externalId);
+
+        chatSnapshots.push({
+          externalId,
+          name: chat.name || chat.formattedTitle || externalId,
+          pushname: chat.name || chat.formattedTitle || externalId,
+          avatarUrl: chatAvatarResult.url,
+          messages: Array.isArray(messages)
+            ? messages.map((message) => ({
+                externalMessageId: message.id?._serialized || null,
+                sender: message.fromMe
+                  ? `user:${this.session.userId}`
+                  : message.author || message.from || externalId,
+                body: message.body || null,
+                type: message.type,
+                direction: message.fromMe ? "outbound" : "inbound",
+                ack: message.ack ?? 0,
+                createdAt: new Date(
+                  (message.timestamp || Math.floor(Date.now() / 1000)) * 1000,
+                ).toISOString(),
+              }))
+            : [],
+        });
+      } catch (err) {
+        console.warn(
+          `[WwebjsAdapter] Skipping chat after sync error for ${externalId}:`,
+          err?.message || err,
+        );
+      }
     }
 
     return {
@@ -342,7 +376,6 @@ class WwebjsAdapter extends EventEmitter {
     }
 
     if (payload.mediaFileId) {
-      const { MessageMedia } = require("whatsapp-web.js");
       const mediaPath = resolveStoredMediaPath(payload.mediaPath || "");
 
       if (!fs.existsSync(mediaPath)) {

@@ -2,8 +2,74 @@ import { useState, useEffect } from "react";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ToolsEditorModal } from "@/components/ToolsEditorModal";
 import TerminalMonitorModal from "@/components/TerminalMonitorModal";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useAppStore } from "@/store/useAppStore";
+import { MdFlashOn } from "react-icons/md";
+
+function QrCodeWithCountdown({
+  mediaUrl,
+  originalName,
+  createdAt,
+  size = "h-56 w-56",
+}) {
+  const [timeLeft, setTimeLeft] = useState(120);
+  const [isExpired, setIsExpired] = useState(false);
+
+  useEffect(() => {
+    const createdTime = new Date(createdAt).getTime();
+    const updateCountdown = () => {
+      const now = Date.now();
+      const diff = Math.floor((now - createdTime) / 1000);
+      const remaining = 120 - diff;
+
+      if (remaining <= 0) {
+        setTimeLeft(0);
+        setIsExpired(true);
+      } else {
+        setTimeLeft(remaining);
+        setIsExpired(false);
+      }
+    };
+
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [createdAt]);
+
+  if (isExpired) {
+    return (
+      <div
+        className={`flex ${size} flex-col items-center justify-center rounded-2xl bg-[#2e2f2f] p-6 text-center shadow-lg mx-auto`}
+      >
+        <MdFlashOn className="mb-4 text-3xl text-white/30" />
+        <p className="mb-3 text-xs font-medium text-white/50">QR Expired</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="rounded-full bg-brand-500 px-4 py-1.5 text-[11px] font-bold text-[#10251a] shadow-md hover:bg-brand-600 transition"
+        >
+          Refresh
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`relative ${size} overflow-hidden rounded-2xl bg-white p-4 shadow-lg mx-auto`}
+    >
+      <img
+        src={mediaUrl}
+        alt={originalName}
+        className="h-full w-full object-contain"
+      />
+      <div className="absolute bottom-2 right-2 flex items-center gap-1.5 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
+        <span className={timeLeft <= 10 ? "text-red-400 animate-pulse" : ""}>
+          {timeLeft}s
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function SessionStatusBadge({ status }) {
   const colors = {
@@ -62,6 +128,7 @@ export function SettingsModal({
   onDeleteSession,
   connectLoading,
   qrLoading,
+  syncingWorkspace,
   sessionName,
   sessionPhone,
   onSessionNameChange,
@@ -119,6 +186,9 @@ export function SettingsModal({
       ? modelsMap[defaultAiProviderId].find((m) => m.id === defaultAiModel)
           ?.name || defaultAiModel
       : defaultAiModel || null;
+  const activeSession = sessions.find(
+    (session) => session.id === activeSessionId,
+  );
 
   function providerHint(key) {
     if (!key) return "";
@@ -247,6 +317,11 @@ export function SettingsModal({
                     <span>None active</span>
                   )}
                 </div>
+                {syncingWorkspace ? (
+                  <div className="mt-3 rounded-2xl bg-[#22302a] px-4 py-3 text-sm text-emerald-200 ring-1 ring-emerald-400/15">
+                    Syncing WhatsApp chats and contacts...
+                  </div>
+                ) : null}
               </div>
             </div>
 
@@ -478,22 +553,22 @@ export function SettingsModal({
                     <p className="text-[11px] uppercase tracking-[0.24em] text-white/35">
                       Pairing QR
                     </p>
-                    {qrLoading ? (
+                    {qrLoading && !activeSession?.qrCode ? (
                       <div className="mt-4 rounded-[24px] bg-[#2e2f2f] px-4 py-16 text-center text-sm leading-6 text-white/40">
-                        Loading QR code...
+                        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-white/10">
+                          <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+                        </div>
+                        Waiting for your QR code...
                       </div>
-                    ) : sessions.find(
-                        (session) => session.id === activeSessionId,
-                      )?.qrCode ? (
-                      <div className="mt-4 rounded-[24px] bg-white p-4">
-                        <img
-                          src={
-                            sessions.find(
-                              (session) => session.id === activeSessionId,
-                            )?.qrCode
+                    ) : activeSession?.qrCode ? (
+                      <div className="mt-4">
+                        <QrCodeWithCountdown
+                          mediaUrl={activeSession.qrCode}
+                          originalName="WhatsApp QR"
+                          createdAt={
+                            activeSession.updatedAt || new Date().toISOString()
                           }
-                          alt="QR Code"
-                          className="mx-auto h-56 w-56 rounded-2xl"
+                          size="h-80 w-80"
                         />
                       </div>
                     ) : (

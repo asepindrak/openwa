@@ -92,12 +92,23 @@ async function listReconnectableSessions() {
 }
 
 async function touchSessionState(sessionId, data) {
-  return retryOnSqliteTimeout(() =>
-    prisma.whatsappSession.update({
+  return retryOnSqliteTimeout(async () => {
+    // First verify the session still exists to avoid P2025
+    const exists = await prisma.whatsappSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true },
+    });
+
+    if (!exists) {
+      console.warn(`[SessionService] Attempted to touch non-existent session: ${sessionId}`);
+      return null;
+    }
+
+    return prisma.whatsappSession.update({
       where: { id: sessionId },
       data,
-    }),
-  );
+    });
+  });
 }
 
 module.exports = {

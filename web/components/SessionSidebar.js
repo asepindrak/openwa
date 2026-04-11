@@ -107,7 +107,7 @@ export function SessionSidebar({
 
             {activeSession.qrCode ? (
               <div className="rounded-[24px] bg-white p-3">
-                <img src={activeSession.qrCode} alt="QR Code" className="mx-auto h-40 w-40 rounded-2xl" />
+                <img src={activeSession.qrCode} alt="QR Code" className="mx-auto h-64 w-64 rounded-2xl" />
               </div>
              ) : (
                <div className="rounded-[24px] border border-dashed border-white/10 bg-[#111b21] px-4 py-10 text-center text-sm leading-6 text-white/45">

@@ -25,6 +25,7 @@ import {
   MdLogout,
   MdClose,
   MdFlashOn,
+  MdRefresh,
 } from "react-icons/md";
 
 function formatTime(value) {
@@ -100,6 +101,62 @@ function ChatAvatar({ src, label }) {
   );
 }
 
+function QrCodeWithCountdown({ mediaUrl, originalName, createdAt }) {
+  const [timeLeft, setTimeLeft] = useState(120);
+  const [isExpired, setIsExpired] = useState(false);
+
+  useEffect(() => {
+    const createdTime = new Date(createdAt).getTime();
+    const updateCountdown = () => {
+      const now = Date.now();
+      const diff = Math.floor((now - createdTime) / 1000);
+      const remaining = 120 - diff;
+
+      if (remaining <= 0) {
+        setTimeLeft(0);
+        setIsExpired(true);
+      } else {
+        setTimeLeft(remaining);
+        setIsExpired(false);
+      }
+    };
+
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 1000);
+    return () => clearInterval(timer);
+  }, [createdAt]);
+
+  if (isExpired) {
+    return (
+      <div className="flex h-[450px] w-[450px] flex-col items-center justify-center rounded-2xl bg-[#2e2f2f] p-6 text-center shadow-lg border border-white/5">
+        <MdRefresh className="mb-4 text-5xl text-white/20 animate-spin-slow" />
+        <p className="mb-4 font-medium text-white/60">QR Code Expired</p>
+        <button
+          onClick={() => window.location.reload()}
+          className="rounded-full bg-emerald-500 px-6 py-2 text-sm font-semibold text-white shadow-md hover:bg-emerald-600 transition"
+        >
+          Refresh to Get New QR
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative h-[450px] w-[450px] overflow-hidden rounded-2xl bg-white p-6 shadow-lg">
+      <img
+        src={mediaUrl}
+        alt={originalName}
+        className="h-full w-full object-contain"
+      />
+      <div className="absolute bottom-4 right-4 flex items-center gap-2 rounded-full bg-black/70 px-3 py-1 text-xs font-bold text-white backdrop-blur-sm">
+        <span className={timeLeft <= 10 ? "text-red-400 animate-pulse" : ""}>
+          Expires in {timeLeft}s
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function renderMediaPreview(message) {
   if (!message.mediaFile) {
     return null;
@@ -108,6 +165,12 @@ function renderMediaPreview(message) {
   const mediaUrl = `${getApiBaseUrl()}/${message.mediaFile.relativePath}`;
   const mimeType = String(message.mediaFile.mimeType || "");
   const isSticker = message.type === "sticker" || mimeType === "image/webp";
+  const isQrCode =
+    String(message.mediaFile.originalName || "").toLowerCase() ===
+      "whatsapp-qr.png" ||
+    String(message.mediaFile.fileName || "")
+      .toLowerCase()
+      .startsWith("qr-");
 
   if (isSticker) {
     return (
@@ -127,6 +190,18 @@ function renderMediaPreview(message) {
   }
 
   if (mimeType.startsWith("image/")) {
+    if (isQrCode) {
+      return (
+        <div className="mb-2">
+          <QrCodeWithCountdown
+            mediaUrl={mediaUrl}
+            originalName={message.mediaFile.originalName}
+            createdAt={message.createdAt}
+          />
+        </div>
+      );
+    }
+
     return (
       <a
         href={mediaUrl}
@@ -137,7 +212,7 @@ function renderMediaPreview(message) {
         <img
           src={mediaUrl}
           alt={message.mediaFile.originalName}
-          className="max-h-[320px] w-full rounded-2xl object-cover"
+          className="max-h-[320px] w-full rounded-2xl object-contain"
         />
       </a>
     );
@@ -233,7 +308,26 @@ function renderGridImage(group, onImageClick) {
 
   if (images.length === 1) {
     const img = images[0];
+    const message = group.messages[0];
     const mediaUrl = `${getApiBaseUrl()}/${img.relativePath}`;
+    const isQrCode =
+      String(img.originalName || "").toLowerCase() === "whatsapp-qr.png" ||
+      String(img.fileName || "")
+        .toLowerCase()
+        .startsWith("qr-");
+
+    if (isQrCode) {
+      return (
+        <div className="mb-2">
+          <QrCodeWithCountdown
+            mediaUrl={mediaUrl}
+            originalName={img.originalName}
+            createdAt={message.createdAt}
+          />
+        </div>
+      );
+    }
+
     return (
       <img
         src={mediaUrl}
@@ -286,6 +380,12 @@ function renderMediaPreviewWithCallback(message, onImageClick) {
   const mediaUrl = `${getApiBaseUrl()}/${message.mediaFile.relativePath}`;
   const mimeType = String(message.mediaFile.mimeType || "");
   const isSticker = message.type === "sticker" || mimeType === "image/webp";
+  const isQrCode =
+    String(message.mediaFile.originalName || "").toLowerCase() ===
+      "whatsapp-qr.png" ||
+    String(message.mediaFile.fileName || "")
+      .toLowerCase()
+      .startsWith("qr-");
 
   if (isSticker) {
     return (
@@ -305,11 +405,23 @@ function renderMediaPreviewWithCallback(message, onImageClick) {
   }
 
   if (isImageFile(mimeType)) {
+    if (isQrCode) {
+      return (
+        <div className="mb-2">
+          <QrCodeWithCountdown
+            mediaUrl={mediaUrl}
+            originalName={message.mediaFile.originalName}
+            createdAt={message.createdAt}
+          />
+        </div>
+      );
+    }
+
     return (
       <img
         src={mediaUrl}
         alt={message.mediaFile.originalName}
-        className="mb-2 max-h-[320px] w-full cursor-pointer rounded-2xl object-cover"
+        className="mb-2 max-h-[320px] w-full cursor-pointer rounded-2xl object-contain"
         onClick={() =>
           onImageClick &&
           onImageClick({
@@ -492,13 +604,25 @@ export const ChatWindow = forwardRef(function ChatWindow(
     },
   ];
 
-  const handleShortcutClick = (message) => {
-    setDraft(message);
+  const handleShortcutClick = async (message) => {
     setShortcutMenuOpen(false);
-    // Auto send
-    setTimeout(() => {
-      submitComposer(message);
-    }, 100);
+    setDraft(""); // Clear any existing draft first
+
+    // Use onSendMessage directly to avoid draft race conditions
+    setBusy(true);
+    try {
+      await onSendMessage({
+        body: message,
+        replyToId: null,
+      });
+      onTyping(false);
+    } catch (err) {
+      console.error("Failed to send shortcut message:", err);
+      // Fallback: put it in draft if send fails
+      setDraft(message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const searchResults = useMemo(() => {
@@ -1355,8 +1479,8 @@ export const ChatWindow = forwardRef(function ChatWindow(
             ref={shortcutTriggerRef}
             className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition ${
               shortcutMenuOpen
-                ? "bg-brand-500 text-[#10251a]"
-                : "bg-[#2e2f2f] text-white/60 hover:bg-[#3a3b3b] hover:text-white"
+                ? "bg-brand-500 text-[#10251a] ring-2 ring-emerald-400/60 shadow-[0_0_0_8px_rgba(16,37,26,0.12)]"
+                : "bg-[#2e2f2f] text-white/60 hover:bg-[#3a3b3b] hover:text-white ring-1 ring-emerald-400/30 animate-pulse"
             }`}
             onClick={() => setShortcutMenuOpen(!shortcutMenuOpen)}
             title="Shortcuts"

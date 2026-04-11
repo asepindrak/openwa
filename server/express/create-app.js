@@ -674,7 +674,10 @@ function createApp({ config, sessionManager }) {
         req.user.id,
         req.body,
       );
-      await chatService.createSessionCompanionChat(req.user.id, session);
+      // Only create companion chat if requested or not explicitly disabled
+      if (req.body.createCompanionChat !== false) {
+        await chatService.createSessionCompanionChat(req.user.id, session);
+      }
       res.status(201).json({ session });
     } catch (error) {
       res.status(400).json({ error: error.message });

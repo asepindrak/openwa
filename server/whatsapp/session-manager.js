@@ -65,6 +65,9 @@ class SessionManager extends EventEmitter {
 
     const session = await sessionService.getSessionById(userId, sessionId);
     if (!session) {
+      console.warn(
+        `[SessionManager] Attempted to connect non-existent session: ${sessionId}`,
+      );
       throw new Error("Session not found.");
     }
 
@@ -198,6 +201,7 @@ class SessionManager extends EventEmitter {
           transportType: payload.transportType || transportType,
           lastError: payload.lastError || null,
           qrCode: nextQrCode,
+          phoneNumber: payload.phoneNumber || undefined,
         });
 
         this.emit("session-status", {
@@ -208,6 +212,7 @@ class SessionManager extends EventEmitter {
           transportType: payload.transportType || transportType,
           lastError: payload.lastError || null,
           qrCode: nextQrCode,
+          phoneNumber: payload.phoneNumber || undefined,
         });
 
         if (
@@ -215,6 +220,14 @@ class SessionManager extends EventEmitter {
           typeof adapter.getSyncSnapshot === "function"
         ) {
           try {
+            // Emit a starting event so UI can show a specific "syncing" state
+            this.emit("workspace-sync-started", {
+              id: session.id,
+              userId: session.userId,
+              sessionId: session.id,
+              status: "syncing",
+            });
+
             const snapshot = await adapter.getSyncSnapshot();
             await chatService.syncWhatsappSnapshot({
               userId: session.userId,
@@ -227,11 +240,25 @@ class SessionManager extends EventEmitter {
               id: session.id,
               userId: session.userId,
               sessionId: session.id,
+              status: "completed",
             });
           } catch (error) {
             const lastError = `WhatsApp sync failed: ${error.message}`;
+            console.error(
+              `[SessionManager] Sync error for session ${session.id}:`,
+              error,
+            );
+
             await sessionService.touchSessionState(session.id, {
               lastError,
+            });
+
+            this.emit("workspace-sync", {
+              id: session.id,
+              userId: session.userId,
+              sessionId: session.id,
+              status: "failed",
+              error: lastError,
             });
 
             this.emit("session-status", {

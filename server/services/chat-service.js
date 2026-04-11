@@ -270,7 +270,7 @@ async function ensureWelcomeWorkspace(userId) {
           create: {
             sender: "system",
             receiver: `user:${userId}`,
-            body: "Selamat datang di OpenWA. Tambahkan sesi WhatsApp baru untuk mulai menghubungkan nomor.",
+            body: "Welcome to OpenWA! I'm your AI assistant. I can autonomously set up a new WhatsApp device for you. Shall we add one now?",
             type: "text",
             direction: "inbound",
             statuses: {
@@ -287,7 +287,7 @@ async function ensureWelcomeWorkspace(userId) {
       where: { id: contact.id },
       data: {
         lastMessagePreview:
-          "Selamat datang di OpenWA. Tambahkan sesi WhatsApp baru untuk mulai menghubungkan nomor.",
+          "Welcome to OpenWA! I'm your AI assistant. I can autonomously set up a new WhatsApp device for you. Shall we add one now?",
         lastMessageAt: new Date(),
         unreadCount: 0,
       },
@@ -345,7 +345,7 @@ async function createSessionCompanionChat(userId, session) {
           create: {
             sender: externalId,
             receiver: `user:${userId}`,
-            body: `Session ${session.name} siap digunakan. Klik Connect untuk menghasilkan QR code.`,
+            body: `Session ${session.name} is ready. Would you like me to connect it and generate a QR code for you?`,
             type: "text",
             direction: "inbound",
             statuses: {
@@ -359,7 +359,7 @@ async function createSessionCompanionChat(userId, session) {
     await prisma.contact.update({
       where: { id: contact.id },
       data: {
-        lastMessagePreview: `Session ${session.name} siap digunakan. Klik Connect untuk menghasilkan QR code.`,
+        lastMessagePreview: `Session ${session.name} is ready. Would you like me to connect it and generate a QR code for you?`,
         lastMessageAt: new Date(),
       },
     });
@@ -395,7 +395,7 @@ async function createAssistantConversation(userId, { title } = {}) {
           create: {
             sender: externalId,
             receiver: `user:${userId}`,
-            body: "Percakapan Assistant baru dimulai.",
+            body: "New assistant conversation started. How can I help you today?",
             type: "text",
             direction: "inbound",
             statuses: {
@@ -412,7 +412,8 @@ async function createAssistantConversation(userId, { title } = {}) {
     prisma.contact.update({
       where: { id: contact.id },
       data: {
-        lastMessagePreview: "Percakapan Assistant baru dimulai.",
+        lastMessagePreview:
+          "New assistant conversation started. How can I help you today?",
         lastMessageAt: new Date(),
       },
     }),
