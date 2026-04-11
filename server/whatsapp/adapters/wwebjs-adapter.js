@@ -156,8 +156,6 @@ class WwebjsAdapter extends EventEmitter {
         protocolTimeout: 120000,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
         timeout: 0,
-        // store puppeteer profile/cache in the user data dir under storage
-        userDataDir: path.join(storageDir, ".wwebjs_cache"),
       },
     });
 

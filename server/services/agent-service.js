@@ -23,7 +23,9 @@ const toolExecutor = require("./tool-executor");
 const { prisma } = require("../database/client");
 const { v4: uuidv4 } = require("uuid");
 const toolCredentialService = require("./tool-credential-service");
+const TelegramService = require("./telegram-service");
 const userSettings = require("./user-settings");
+const QRCode = require("qrcode");
 const { fetchWebpage, openBrowser } = require("../utils/browser");
 const OS_NAME_MAP = { win32: "Windows", darwin: "macOS", linux: "Linux" };
 const hostPlatform = process.platform || "unknown";
@@ -48,6 +50,7 @@ Default skills:
 - update_assistant: change assistant display name, avatar, or persona.
 - create_api_key: generate an API key for the user.
 - update_webhook: set incoming webhook URL and key.
+- setup_telegram_bot: set up a Telegram bot to remote OpenWA. User must provide a bot token from @BotFather.
 - update_tools_md: update this file with new tools/skills provided by user.
 
 The assistant may append new tool descriptions here when the user provides external tool documentation.
@@ -655,6 +658,9 @@ function buildAssistantSystemPrompt({
   parts.push(
     "5. Iteration: Analyze tool results. If a command fails, describe why in prose and try a different approach.",
   );
+  parts.push(
+    "6. WhatsApp Automation: When adding a new device with 'add_device', the tool will automatically handle session connection, QR code generation, and wait for the user to scan. You do not need to instruct the user to go to settings or manually wait; the tool will provide the QR code in the chat automatically.",
+  );
   parts.push("");
   parts.push(`Available tools: ${toolsList}.`);
   parts.push("");
@@ -872,8 +878,12 @@ const tools = {
     const name = String(args.name || "").trim();
     const phoneNumber = args.phoneNumber || null;
     if (!name) throw new Error("name is required");
+    const { sessionManager, io, chatId } = ctx || {};
+    if (!sessionManager) throw new Error("sessionManager not found in context");
 
-    // Create session record and companion chat
+    const assistantSender = "openwa:assistant";
+    const assistantDisplayName = "OpenWA Assistant";
+
     const session = await sessionService.createUserSession(userId, {
       name,
       phoneNumber: phoneNumber || null,
@@ -885,18 +895,105 @@ const tools = {
       // ignore companion chat errors
     }
 
-    // Optionally attempt immediate connect if sessionManager provided
-    try {
-      if (ctx && ctx.sessionManager) {
-        await ctx.sessionManager.connectSession(userId, session.id, {
+    return new Promise(async (resolve, reject) => {
+      let qrSent = false;
+      const timeoutSeconds = 180;
+      const timeout = setTimeout(() => {
+        sessionManager.removeListener("session-status", onStatus);
+        resolve({
+          ok: false,
+          error:
+            "Connection timed out after 3 minutes. Please try again or check the Sessions settings.",
+          session,
+        });
+      }, timeoutSeconds * 1000);
+
+      const onStatus = async (payload) => {
+        if (payload.sessionId !== session.id) return;
+
+        // If we get a QR code and haven't sent it to this chat yet, send it
+        if (payload.qrCode && !qrSent && chatId) {
+          qrSent = true;
+          try {
+            // Convert data URL to buffer and save as media file
+            const base64Data = payload.qrCode.split(",")[1];
+            if (base64Data) {
+              const buffer = Buffer.from(base64Data, "base64");
+              const filename = `qr-${session.id}-${Date.now()}.png`;
+              const filePath = path.join(mediaDir, filename);
+
+              if (!fs.existsSync(mediaDir)) {
+                fs.mkdirSync(mediaDir, { recursive: true });
+              }
+              fs.writeFileSync(filePath, buffer);
+
+              const mediaFile = await prisma.mediaFile.create({
+                data: {
+                  userId,
+                  fileName: filename,
+                  originalName: "whatsapp-qr.png",
+                  mimeType: "image/png",
+                  size: buffer.length,
+                  relativePath: `media/${filename}`,
+                },
+              });
+
+              await sendAssistantMessage(
+                userId,
+                assistantSender,
+                assistantDisplayName,
+                `Please scan this QR code with your WhatsApp mobile app to connect the device "${name}".`,
+                io,
+                chatId,
+                mediaFile.id,
+              );
+            }
+          } catch (err) {
+            console.error("[add_device] Failed to send QR to chat:", err);
+          }
+        }
+
+        if (payload.status === "ready") {
+          clearTimeout(timeout);
+          sessionManager.removeListener("session-status", onStatus);
+
+          if (chatId) {
+            await sendAssistantMessage(
+              userId,
+              assistantSender,
+              assistantDisplayName,
+              `✅ WhatsApp device "${name}" is now connected and ready!`,
+              io,
+              chatId,
+            );
+          }
+
+          resolve({ ok: true, session, status: "ready" });
+        }
+
+        if (payload.status === "error") {
+          clearTimeout(timeout);
+          sessionManager.removeListener("session-status", onStatus);
+          resolve({
+            ok: false,
+            error: payload.lastError || "Failed to connect WhatsApp session.",
+            session,
+          });
+        }
+      };
+
+      sessionManager.on("session-status", onStatus);
+
+      try {
+        await sessionManager.connectSession(userId, session.id, {
           force: true,
         });
+      } catch (e) {
+        clearTimeout(timeout);
+        sessionManager.removeListener("session-status", onStatus);
+        reject(e);
       }
-    } catch (e) {
-      // ignore connection errors; return created session so caller can act
-    }
-
-    return { ok: true, session };
+    });
   },
   add_llm_provider: async (userId, args) => {
     const provider = String(args.provider || "").toLowerCase();
@@ -1160,6 +1257,31 @@ const tools = {
     const result = await openBrowser(url);
     return result;
   },
+  setup_telegram_bot: async (userId, args) => {
+    const token = String(args.token || args.botToken || "").trim();
+    if (!token) throw new Error("Telegram Bot Token is required.");
+
+    // Validate token by starting the bot
+    try {
+      await TelegramService.startBot(userId, token);
+    } catch (err) {
+      throw new Error(
+        `Failed to start Telegram Bot: ${err.message}. Please check your token.`,
+      );
+    }
+
+    // Save token securely
+    await toolCredentialService.saveCredential(userId, "telegram_bot", {
+      apiKey: token,
+      headerName: "X-Telegram-Bot-Token",
+    });
+
+    return {
+      ok: true,
+      message:
+        "Telegram Bot has been successfully set up and is now running. You can now remote OpenWA via your Telegram bot.",
+    };
+  },
 };
 
 // Invoke a registered tool by id. Supports HTTP and OpenAPI-backed tools.
@@ -1328,7 +1450,8 @@ async function invokeRegisteredTool(userId, toolId, options = {}, ctx = {}) {
 }
 
 async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
-  const { config, io, socket, sessionManager } = ctx || {};
+  ctx = Object.assign({ chatId }, ctx || {});
+  const { config, io, socket, sessionManager } = ctx;
   const assistantInput = normalizeAssistantInput(input);
   const mediaFile = await loadAssistantMediaFile(
     userId,
@@ -1579,6 +1702,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
           assistantDisplayName,
           fail,
           io,
+          chatId,
         );
         return;
       }
@@ -1591,6 +1715,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
           assistantDisplayName,
           "Model AI tidak mengembalikan isi respons.",
           io,
+          chatId,
         );
         return;
       }
@@ -1607,6 +1732,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
           assistantDisplayName,
           text,
           io,
+          chatId,
         );
         return;
       }
@@ -1623,6 +1749,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
           assistantDisplayName,
           thinkingText,
           io,
+          chatId,
         );
       } else if (text.includes("{") && text.includes("}")) {
         // If there's prose AFTER the JSON or if it was formatted oddly but parsed
@@ -1634,6 +1761,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
             assistantDisplayName,
             beforeJson,
             io,
+            chatId,
           );
         }
       }
@@ -1753,6 +1881,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
         assistantDisplayName,
         "Task exceeds maximum turns limit.",
         io,
+        chatId,
       );
     }
   } finally {
@@ -1768,19 +1897,65 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
   }
 }
 
-async function sendAssistantMessage(userId, sender, displayName, body, io) {
+async function sendAssistantMessage(
+  userId,
+  sender,
+  displayName,
+  body,
+  io,
+  chatId,
+  mediaFileId = null,
+) {
   try {
-    const assistantMsg = await chatService.storeIncomingMessage({
-      userId,
-      sessionId: null,
-      sender,
-      displayName,
-      body,
-    });
+    let assistantMsg;
+    if (chatId) {
+      assistantMsg = await chatService.storeIncomingMessageInChat({
+        userId,
+        chatId,
+        sender,
+        body,
+        type: mediaFileId ? "image" : "text",
+        mediaFileId,
+      });
+    } else {
+      assistantMsg = await chatService.storeIncomingMessage({
+        userId,
+        sessionId: null,
+        sender,
+        displayName,
+        body,
+        mediaFileId,
+        type: mediaFileId ? "image" : "text",
+      });
+    }
+
+    // If the chat is a Telegram chat, send to Telegram as well
+    if (
+      assistantMsg &&
+      assistantMsg.chat &&
+      assistantMsg.chat.transportType === "telegram"
+    ) {
+      const telegramId = TelegramService.extractTelegramId(
+        assistantMsg.chat.externalId,
+      );
+      if (telegramId) {
+        if (assistantMsg.message.mediaFileId) {
+          await TelegramService.sendMedia(
+            userId,
+            telegramId,
+            assistantMsg.message.mediaFile,
+            body,
+          );
+        } else {
+          await TelegramService.sendMessage(userId, telegramId, body);
+        }
+      }
+    }
+
     io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
     io.to(`user:${userId}`).emit("contact_list_update", assistantMsg.chat);
   } catch (e) {
-    // ignore
+    console.error("[sendAssistantMessage] Error:", e);
   }
 }
 

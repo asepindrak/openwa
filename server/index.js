@@ -12,6 +12,7 @@ const sessionService = require("./services/session-service");
 const { registerSocketHandlers, userRoom } = require("./socket/register");
 const { ensureRuntimeDirs, webDir } = require("./utils/paths");
 const { SessionManager } = require("./whatsapp/session-manager");
+const TelegramService = require("./services/telegram-service");
 function shouldProxyToBackend(req) {
   const url = new URL(req.url || "/", "http://localhost");
   return (
@@ -123,6 +124,9 @@ async function startOpenWA({ dev = false } = {}) {
     },
   });
 
+  TelegramService.setIo(io);
+  await TelegramService.initializeAll();
+
   // make io available to express routes via req.app.get('io')
   app.set("io", io);
 
@@ -188,6 +192,18 @@ async function startOpenWA({ dev = false } = {}) {
       console.warn(`Browser auto-open failed: ${error.message}`);
     }
   }
+
+  // Graceful shutdown
+  const shutdown = async () => {
+    console.log("\n[OpenWA] Shutting down gracefully...");
+    try {
+      await TelegramService.stopAll();
+    } catch (e) {}
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 
   return { app, backendServer, frontendServer, io };
 }

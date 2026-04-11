@@ -17,6 +17,7 @@ enum SessionState {
 enum TransportType {
   mock
   wwebjs
+  telegram
 }
 
 enum MessageType {

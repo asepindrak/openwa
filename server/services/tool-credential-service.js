@@ -113,4 +113,5 @@ module.exports = {
   saveCredential,
   getCredentialForUser,
   removeCredentialForUser,
+  readStore,
 };

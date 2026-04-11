@@ -15,11 +15,15 @@ async function getSetting(userId, key) {
         where: { userId: id },
       });
       if (rec) {
-        if (key === "autoApproveAllTerminalCommands")
+        if (
+          key === "autoApproveAllTerminalCommands" &&
+          rec.autoApproveAllTerminalCommands !== null
+        )
           return rec.autoApproveAllTerminalCommands;
-        if (key === "defaultAiProviderId") return rec.defaultAiProviderId;
-        if (key === "defaultAiModel") return rec.defaultAiModel;
-        return undefined;
+        if (key === "defaultAiProviderId" && rec.defaultAiProviderId !== null)
+          return rec.defaultAiProviderId;
+        if (key === "defaultAiModel" && rec.defaultAiModel !== null)
+          return rec.defaultAiModel;
       }
     }
   } catch (e) {
@@ -27,7 +31,11 @@ async function getSetting(userId, key) {
   }
 
   const current = inMemory.get(id) || {};
-  return current[key];
+  if (current[key] !== undefined) return current[key];
+
+  // Default values
+  if (key === "autoApproveAllTerminalCommands") return true;
+  return undefined;
 }
 
 async function setSetting(userId, key, value) {

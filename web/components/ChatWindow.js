@@ -24,6 +24,7 @@ import {
   MdSettings,
   MdLogout,
   MdClose,
+  MdFlashOn,
 } from "react-icons/md";
 
 function formatTime(value) {
@@ -407,6 +408,98 @@ export const ChatWindow = forwardRef(function ChatWindow(
   const fileInputRef = useRef(null);
   const menuTriggerRef = useRef(null);
   const emojiTriggerRef = useRef(null);
+  const emojiContainerRef = useRef(null);
+  const [shortcutMenuOpen, setShortcutMenuOpen] = useState(false);
+  const shortcutTriggerRef = useRef(null);
+  const shortcutContainerRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      // Handle Emoji Picker click outside
+      if (
+        emojiPickerOpen &&
+        emojiContainerRef.current &&
+        !emojiContainerRef.current.contains(event.target) &&
+        !emojiTriggerRef.current.contains(event.target)
+      ) {
+        setEmojiPickerOpen(false);
+      }
+
+      // Handle Shortcut Menu click outside
+      if (
+        shortcutMenuOpen &&
+        shortcutContainerRef.current &&
+        !shortcutContainerRef.current.contains(event.target) &&
+        !shortcutTriggerRef.current.contains(event.target)
+      ) {
+        setShortcutMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [emojiPickerOpen, shortcutMenuOpen]);
+
+  const shortcuts = [
+    {
+      label: "Latest Messages",
+      message: "Show me the latest messages from my WhatsApp chats",
+      icon: "💬",
+    },
+    {
+      label: "Create Coding Project",
+      message:
+        "I want to create a new coding project in the workspace. Help me scaffold it.",
+      icon: "🚀",
+    },
+    {
+      label: "Register New Tool",
+      message:
+        "I want to register a new external tool/API to your capabilities.",
+      icon: "🛠️",
+    },
+    {
+      label: "Integrate Telegram",
+      message: "How can I remote OpenWA via Telegram?",
+      icon: "🤖",
+    },
+    {
+      label: "Add WhatsApp Device",
+      message: "Please help me add a new WhatsApp device",
+      icon: "📱",
+    },
+    {
+      label: "Setup LLM Provider",
+      message: "Help me setup an LLM Provider (OpenAI/Anthropic/Ollama)",
+      icon: "🧠",
+    },
+    {
+      label: "Create API Key",
+      message: "I want to create a new API Key",
+      icon: "🔑",
+    },
+    {
+      label: "Check Workspace",
+      message: "Check the contents of my workspace folder",
+      icon: "📁",
+    },
+    {
+      label: "Help / Capabilities",
+      message: "What are your capabilities as an AI Assistant?",
+      icon: "❓",
+    },
+  ];
+
+  const handleShortcutClick = (message) => {
+    setDraft(message);
+    setShortcutMenuOpen(false);
+    // Auto send
+    setTimeout(() => {
+      submitComposer(message);
+    }, 100);
+  };
 
   const searchResults = useMemo(() => {
     const query = String(messageQuery || "")
@@ -1244,13 +1337,53 @@ export const ChatWindow = forwardRef(function ChatWindow(
             <MdEmojiEmotions className="w-5 h-5" />
           </button>
           {emojiPickerOpen && (
-            <div className="absolute bottom-full left-0 z-50">
+            <div
+              ref={emojiContainerRef}
+              className="absolute bottom-full left-0 z-50"
+            >
               <EmojiPicker
                 isOpen={emojiPickerOpen}
                 onClose={() => setEmojiPickerOpen(false)}
                 onEmojiSelect={handleEmojiSelect}
                 triggerRef={emojiTriggerRef}
               />
+            </div>
+          )}
+
+          <button
+            type="button"
+            ref={shortcutTriggerRef}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition ${
+              shortcutMenuOpen
+                ? "bg-brand-500 text-[#10251a]"
+                : "bg-[#2e2f2f] text-white/60 hover:bg-[#3a3b3b] hover:text-white"
+            }`}
+            onClick={() => setShortcutMenuOpen(!shortcutMenuOpen)}
+            title="Shortcuts"
+          >
+            <MdFlashOn className="w-5 h-5" />
+          </button>
+          {shortcutMenuOpen && (
+            <div
+              ref={shortcutContainerRef}
+              className="absolute bottom-full left-12 z-50 mb-2 w-64 overflow-hidden rounded-2xl bg-[#2e2f2f] p-1 shadow-2xl ring-1 ring-white/10"
+            >
+              <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-white/30">
+                AI Shortcuts
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {shortcuts.map((shortcut, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    className="flex w-full items-center gap-3 px-3 py-2.5 text-left text-sm text-white/90 transition hover:bg-white/5 first:rounded-t-xl last:rounded-b-xl"
+                    onClick={() => handleShortcutClick(shortcut.message)}
+                  >
+                    <span className="text-lg">{shortcut.icon}</span>
+                    <span className="flex-1 font-medium">{shortcut.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           <div className="flex flex-1 items-center rounded-[22px] bg-[#2e2f2f] px-4 py-2">
