@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { getApiBaseUrl } from "@/lib/api";
+import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useAppStore } from "@/store/useAppStore";
 import { ChatProfileModal } from "@/components/ChatProfileModal";
 import { MessageMarkdown } from "@/components/MessageMarkdown";
@@ -26,6 +26,7 @@ import {
   MdClose,
   MdFlashOn,
   MdRefresh,
+  MdSmartToy,
 } from "react-icons/md";
 
 function formatTime(value) {
@@ -524,6 +525,16 @@ export const ChatWindow = forwardRef(function ChatWindow(
   const [shortcutMenuOpen, setShortcutMenuOpen] = useState(false);
   const shortcutTriggerRef = useRef(null);
   const shortcutContainerRef = useRef(null);
+  const [aiMenuOpen, setAiMenuOpen] = useState(false);
+  const aiTriggerRef = useRef(null);
+  const aiContainerRef = useRef(null);
+  const [aiProviders, setAiProviders] = useState([]);
+  const [aiProvidersLoading, setAiProvidersLoading] = useState(false);
+  const [modelsMap, setModelsMap] = useState({});
+  const [selectedAiProviderId, setSelectedAiProviderId] = useState("");
+  const [selectedAiModel, setSelectedAiModel] = useState("");
+  const [manualModelInput, setManualModelInput] = useState("");
+  const [savingAiSelection, setSavingAiSelection] = useState(false);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -546,13 +557,23 @@ export const ChatWindow = forwardRef(function ChatWindow(
       ) {
         setShortcutMenuOpen(false);
       }
+
+      // Handle AI Provider menu click outside
+      if (
+        aiMenuOpen &&
+        aiContainerRef.current &&
+        !aiContainerRef.current.contains(event.target) &&
+        !aiTriggerRef.current.contains(event.target)
+      ) {
+        setAiMenuOpen(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [emojiPickerOpen, shortcutMenuOpen]);
+  }, [emojiPickerOpen, shortcutMenuOpen, aiMenuOpen]);
 
   const shortcuts = [
     {
@@ -782,7 +803,97 @@ export const ChatWindow = forwardRef(function ChatWindow(
   const token = useAppStore((s) => s.token);
   const setActiveChat = useAppStore((s) => s.setActiveChat);
   const upsertChat = useAppStore((s) => s.upsertChat);
+  const defaultAiProviderId = useAppStore((s) => s.defaultAiProviderId);
+  const defaultAiModel = useAppStore((s) => s.defaultAiModel);
+  const setDefaultAiProvider = useAppStore((s) => s.setDefaultAiProvider);
+  const setDefaultAiModel = useAppStore((s) => s.setDefaultAiModel);
   const [creatingAssistant, setCreatingAssistant] = useState(false);
+
+  useEffect(() => {
+    if (!aiMenuOpen) return undefined;
+    let mounted = true;
+    setAiProvidersLoading(true);
+    setSelectedAiProviderId(defaultAiProviderId || "");
+    setSelectedAiModel(defaultAiModel || "");
+    setManualModelInput("");
+
+    (async () => {
+      if (!token) {
+        if (mounted) setAiProvidersLoading(false);
+        return;
+      }
+      try {
+        const data = await apiFetch("/api/ai-providers", { token });
+        if (!mounted) return;
+        setAiProviders(data.providers || []);
+      } catch (err) {
+        // ignore
+      } finally {
+        if (mounted) setAiProvidersLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [aiMenuOpen, token, defaultAiProviderId, defaultAiModel]);
+
+  useEffect(() => {
+    if (!selectedAiProviderId || modelsMap[selectedAiProviderId] || !token) {
+      return undefined;
+    }
+
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await apiFetch(
+          `/api/ai-providers/${selectedAiProviderId}/models`,
+          { token },
+        );
+        if (!mounted) return;
+        setModelsMap((current) => ({
+          ...current,
+          [selectedAiProviderId]: data.models || [],
+        }));
+      } catch (err) {
+        // ignore
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [selectedAiProviderId, token, modelsMap]);
+
+  const handleSaveAiSelection = async () => {
+    if (!selectedAiProviderId) return;
+    setSavingAiSelection(true);
+    try {
+      await setDefaultAiProvider(selectedAiProviderId);
+      const nextModel = selectedAiModel || manualModelInput.trim() || null;
+      await setDefaultAiModel(nextModel);
+      setAiMenuOpen(false);
+    } catch (err) {
+      // ignore
+    } finally {
+      setSavingAiSelection(false);
+    }
+  };
+
+  const handleAiProviderChange = (providerId) => {
+    setSelectedAiProviderId(providerId);
+    setSelectedAiModel("");
+    setManualModelInput("");
+  };
+
+  const handleAiModelChange = (modelId) => {
+    setSelectedAiModel(modelId);
+    setManualModelInput("");
+  };
+
+  const handleAiManualModelInput = (value) => {
+    setManualModelInput(value);
+  };
 
   const handleConfirmScan = async (sessionId, messageId) => {
     if (!token) return alert("Not authenticated");
@@ -1510,6 +1621,118 @@ export const ChatWindow = forwardRef(function ChatWindow(
               </div>
             </div>
           )}
+
+          <button
+            type="button"
+            ref={aiTriggerRef}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition ${
+              aiMenuOpen
+                ? "bg-emerald-500 text-white ring-2 ring-emerald-300/70 shadow-[0_0_0_8px_rgba(23,163,70,0.18)]"
+                : "bg-orange-500 text-white hover:bg-orange-600 ring-1 ring-orange-300/30"
+            }`}
+            onClick={() => setAiMenuOpen(!aiMenuOpen)}
+            title="AI Provider settings"
+          >
+            <MdSmartToy className="w-5 h-5" />
+          </button>
+          {aiMenuOpen && (
+            <div
+              ref={aiContainerRef}
+              className="absolute bottom-full left-20 z-50 mb-2 w-72 overflow-hidden rounded-2xl bg-[#2e2f2f] p-3 shadow-2xl ring-1 ring-white/10"
+            >
+              <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-wider text-white/30">
+                AI Provider & Model
+              </div>
+
+              {aiProvidersLoading ? (
+                <div className="rounded-2xl bg-[#161717] px-4 py-4 text-center text-sm text-white/50">
+                  Loading providers...
+                </div>
+              ) : aiProviders.length === 0 ? (
+                <div className="rounded-2xl bg-[#161717] px-4 py-4 text-sm text-white/60">
+                  No AI providers configured. Open settings to add one.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="mb-1 block text-xs uppercase tracking-[0.22em] text-white/40">
+                      Provider
+                    </label>
+                    <select
+                      className="w-full rounded-[14px] bg-[#161717] px-3 py-2 text-sm text-white outline-none"
+                      value={selectedAiProviderId}
+                      onChange={(event) =>
+                        handleAiProviderChange(event.target.value)
+                      }
+                    >
+                      <option value="">Select provider</option>
+                      {aiProviders.map((provider) => (
+                        <option key={provider.id} value={provider.id}>
+                          {provider.name} ({provider.provider})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {selectedAiProviderId ? (
+                    <div>
+                      <label className="mb-1 block text-xs uppercase tracking-[0.22em] text-white/40">
+                        Model
+                      </label>
+                      {modelsMap[selectedAiProviderId]?.length ? (
+                        <>
+                          <select
+                            className="w-full rounded-[14px] bg-[#161717] px-3 py-2 text-sm text-white outline-none"
+                            value={selectedAiModel}
+                            onChange={(event) =>
+                              handleAiModelChange(event.target.value)
+                            }
+                          >
+                            <option value="">Select model</option>
+                            {modelsMap[selectedAiProviderId].map((model) => (
+                              <option key={model.id} value={model.id}>
+                                {model.name || model.id}
+                              </option>
+                            ))}
+                            <option value="manual-model">Manual model</option>
+                          </select>
+                          {selectedAiModel === "manual-model" ? (
+                            <input
+                              className="mt-2 w-full rounded-[14px] bg-[#161717] px-3 py-2 text-sm text-white outline-none"
+                              placeholder="Enter model id"
+                              value={manualModelInput}
+                              onChange={(event) =>
+                                handleAiManualModelInput(event.target.value)
+                              }
+                            />
+                          ) : null}
+                        </>
+                      ) : (
+                        <input
+                          className="w-full rounded-[14px] bg-[#161717] px-3 py-2 text-sm text-white outline-none"
+                          placeholder="Enter model id"
+                          value={manualModelInput}
+                          onChange={(event) =>
+                            handleAiManualModelInput(event.target.value)
+                          }
+                        />
+                      )}
+                    </div>
+                  ) : null}
+
+                  <button
+                    type="button"
+                    className="w-full rounded-[14px] bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a] transition hover:bg-brand-600 disabled:opacity-60"
+                    onClick={handleSaveAiSelection}
+                    disabled={!selectedAiProviderId || savingAiSelection}
+                  >
+                    {savingAiSelection ? "Saving..." : "Set AI provider"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-1 items-center rounded-[22px] bg-[#2e2f2f] px-4 py-2">
             <textarea
               ref={composerRef}
