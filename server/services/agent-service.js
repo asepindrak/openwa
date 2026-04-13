@@ -54,7 +54,9 @@ function parseNewPasswordCommand(body) {
   const match = text.match(/^\s*\/(?:new_password|new-password)\s+(.+)$/i);
   if (match) return match[1].trim();
 
-  const directMatch = text.match(/(?:password baru|new password|kata sandi|password)[:\s]+(.+)$/i);
+  const directMatch = text.match(
+    /(?:password baru|new password|kata sandi|password)[:\s]+(.+)$/i,
+  );
   if (directMatch) return directMatch[1].trim();
 
   // Accept a plain password string once the reset flow is active
