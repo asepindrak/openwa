@@ -69,6 +69,9 @@ docker run -p 55111:55111 \
   -e HOST=0.0.0.0 \
   -e FE_PORT=55111 \
   -e BE_PORT=55222 \
+  -e OPENWA_DATA_DIR=/app/storage \
+  -e OPENWA_HOME=/app/storage \
+  -e DATABASE_URL=file:./storage/database/openwa.db \
   -v openwa-storage:/app/storage \
   openwa:latest
 ```
@@ -152,15 +155,6 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
-
-    location /api {
-        proxy_pass http://localhost:55222;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
 }
 ```
 
@@ -173,9 +167,6 @@ server {
     ProxyPreserveHost On
     ProxyPass / http://localhost:55111/
     ProxyPassReverse / http://localhost:55111/
-
-    ProxyPass /api http://localhost:55222/
-    ProxyPassReverse /api http://localhost:55222/
 </VirtualHost>
 ```
 

@@ -14,6 +14,8 @@ services:
       HOST: "${HOST}"
       FE_PORT: "${FE_PORT}"
       BE_PORT: "${BE_PORT}"
+      OPENWA_DATA_DIR: "/app/storage"
+      OPENWA_HOME: "/app/storage"
       OPENWA_AUTO_OPEN: "${OPENWA_AUTO_OPEN}"
       OPENWA_USE_WWEBJS: "${OPENWA_USE_WWEBJS}"
       OPENWA_ALLOW_MOCK: "${OPENWA_ALLOW_MOCK}"

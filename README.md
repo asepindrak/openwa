@@ -157,6 +157,7 @@ For Docker Compose or server deployment, you can configure additional runtime va
 HOST=0.0.0.0
 FE_PORT=55111
 BE_PORT=55222
+OPENWA_DATA_DIR=/app/storage
 OPENWA_JWT_SECRET=your_secret_key_here
 OPENWA_AUTO_OPEN=false
 OPENWA_USE_WWEBJS=true
@@ -164,7 +165,7 @@ OPENWA_ALLOW_MOCK=false
 DATABASE_URL=file:./storage/database/openwa.db
 ```
 
-OpenWA will automatically derive frontend and backend URLs from `HOST`, `FE_PORT`, and `BE_PORT`.
+When running in Docker, `OPENWA_DATA_DIR` should point to the mounted storage volume (`/app/storage` by default). OpenWA will automatically derive frontend and backend URLs from `HOST`, `FE_PORT`, and `BE_PORT`.
 
 If `OPENWA_JWT_SECRET` is not set, the first `openwa` run will prompt you to enter it and save it into `.env` automatically. For production use, set a strong secret before starting OpenWA.
 
@@ -180,7 +181,7 @@ If `OPENWA_JWT_SECRET` is not set, the first `openwa` run will prompt you to ent
 ## Typical usage flow
 
 1. Start OpenWA.
-2. Open the dashboard at `http://localhost:55111`.
+2. Open the dashboard at `http://localhost:55111` or your deployment host.
 3. Register the first user or log in.
 4. Create a new WhatsApp session from the dashboard.
 5. Connect the session to generate a QR code.
