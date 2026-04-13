@@ -37,6 +37,21 @@ const {
 const { initializeDatabase } = require("../database/init");
 const { mediaDir, storageDir, ensureRuntimeDirs } = require("../utils/paths");
 
+function removeDirectoryContents(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    return;
+  }
+
+  for (const entry of fs.readdirSync(dirPath)) {
+    const fullPath = path.join(dirPath, entry);
+    try {
+      fs.rmSync(fullPath, { recursive: true, force: true });
+    } catch (err) {
+      console.warn(`Failed to remove storage entry ${fullPath}:`, err.message);
+    }
+  }
+}
+
 function inferMessageType(file) {
   if (!file?.mimetype) {
     return "document";
@@ -453,7 +468,7 @@ function createApp({ config, sessionManager }) {
       }
 
       if (fs.existsSync(storageDir)) {
-        fs.rmSync(storageDir, { recursive: true, force: true });
+        removeDirectoryContents(storageDir);
       }
       ensureRuntimeDirs();
 
