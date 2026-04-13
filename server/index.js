@@ -24,7 +24,9 @@ function shouldProxyToBackend(req) {
     url.pathname === "/api" ||
     url.pathname.startsWith("/api/") ||
     url.pathname === "/socket.io" ||
-    url.pathname.startsWith("/socket.io/")
+    url.pathname.startsWith("/socket.io/") ||
+    url.pathname === "/media" ||
+    url.pathname.startsWith("/media/")
   );
 }
 
