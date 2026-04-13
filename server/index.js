@@ -14,14 +14,17 @@ const { ensureRuntimeDirs, webDir } = require("./utils/paths");
 const { SessionManager } = require("./whatsapp/session-manager");
 const TelegramService = require("./services/telegram-service");
 function shouldProxyToBackend(req) {
-  const url = new URL(req.url || "/", "http://localhost");
+  const baseHost = req.headers.host || "127.0.0.1";
+  const url = new URL(req.url || "/", `http://${baseHost}`);
   return (
     url.pathname === "/health" ||
     url.pathname === "/version" ||
     url.pathname === "/docs" ||
     url.pathname.startsWith("/docs/") ||
     url.pathname === "/api" ||
-    url.pathname.startsWith("/api/")
+    url.pathname.startsWith("/api/") ||
+    url.pathname === "/socket.io" ||
+    url.pathname.startsWith("/socket.io/")
   );
 }
 
@@ -92,8 +95,6 @@ async function startOpenWA({ dev = false } = {}) {
   const openBrowser = openModule.default || openModule;
 
   const config = getConfig({ dev });
-  process.env.NEXT_PUBLIC_API_URL = config.backendUrl;
-  process.env.NEXT_PUBLIC_SOCKET_URL = config.backendUrl;
 
   ensureRuntimeDirs();
   await initializeDatabase();
@@ -128,6 +129,27 @@ async function startOpenWA({ dev = false } = {}) {
       res.end(JSON.stringify({ error: error.message }));
     }
   });
+
+  frontendServer.on("upgrade", (req, socket, head) => {
+    if (!req.url) {
+      socket.destroy();
+      return;
+    }
+
+    const baseHost = req.headers.host || "127.0.0.1";
+    const url = new URL(req.url, `http://${baseHost}`);
+    if (
+      url.pathname === "/socket.io" ||
+      url.pathname.startsWith("/socket.io/")
+    ) {
+      backendServer.emit("upgrade", req, socket, head);
+      return;
+    }
+
+    // Allow Next.js HMR / other upgrade requests to be handled by the
+    // default request flow when available.
+  });
+
   const io = new Server(backendServer, {
     cors: {
       origin: "*",

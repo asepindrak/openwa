@@ -1,49 +1,9 @@
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
-
-function normalizeBaseUrl(url) {
-  return String(url || "").replace(/\/+$/, "");
-}
-
-function isLoopbackHost(hostname) {
-  return LOOPBACK_HOSTS.has(String(hostname || "").toLowerCase());
-}
-
 export function getApiBaseUrl() {
-  const configuredUrl = normalizeBaseUrl(
-    process.env.NEXT_PUBLIC_API_URL || "http://localhost:55222",
-  );
-
   if (typeof window === "undefined") {
-    return configuredUrl;
+    return "";
   }
 
-  // If the frontend is served over HTTPS and the configured backend URL is HTTP
-  // on the same host, use the secure current origin to avoid mixed content.
-  if (
-    window.location.protocol === "https:" &&
-    configuredUrl.startsWith("http://")
-  ) {
-    try {
-      const resolvedUrl = new URL(configuredUrl);
-      if (resolvedUrl.hostname === window.location.hostname) {
-        return window.location.origin;
-      }
-    } catch {
-      // Ignore parse errors and continue.
-    }
-  }
-
-  try {
-    const resolvedUrl = new URL(configuredUrl);
-
-    if (isLoopbackHost(resolvedUrl.hostname)) {
-      resolvedUrl.hostname = window.location.hostname;
-    }
-
-    return normalizeBaseUrl(resolvedUrl.toString());
-  } catch {
-    return configuredUrl;
-  }
+  return window.location.origin;
 }
 
 function detectPlatform() {

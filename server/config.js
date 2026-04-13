@@ -21,10 +21,8 @@ function getConfig({ dev = false } = {}) {
   ].includes(host)
     ? "localhost"
     : host;
-  const frontendUrl =
-    process.env.OPENWA_FRONTEND_URL || `http://${publicHost}:${frontendPort}`;
-  const backendUrl =
-    process.env.OPENWA_BACKEND_URL || `http://${publicHost}:${backendPort}`;
+  const frontendUrl = `http://${publicHost}:${frontendPort}`;
+  const backendUrl = `http://${publicHost}:${backendPort}`;
 
   return {
     dev,

@@ -157,19 +157,14 @@ For Docker Compose or server deployment, you can configure additional runtime va
 HOST=0.0.0.0
 FE_PORT=55111
 BE_PORT=55222
-OPENWA_FRONTEND_URL=https://openwa.commitflow.space
-OPENWA_BACKEND_URL=https://openwa.commitflow.space
 OPENWA_JWT_SECRET=your_secret_key_here
 OPENWA_AUTO_OPEN=false
 OPENWA_USE_WWEBJS=true
 OPENWA_ALLOW_MOCK=false
 DATABASE_URL=file:./storage/database/openwa.db
-OPENWA_DOMAIN=openwa.commitflow.space
-TRAEFIK_ENTRYPOINT=websecure
-TRAEFIK_TLS=true
 ```
 
-For Docker deployment, `OPENWA_FRONTEND_URL` should match the public domain used by Traefik, and `OPENWA_BACKEND_URL` can point to the internal service URL used within the Docker network.
+OpenWA will automatically derive frontend and backend URLs from `HOST`, `FE_PORT`, and `BE_PORT`.
 
 If `OPENWA_JWT_SECRET` is not set, the first `openwa` run will prompt you to enter it and save it into `.env` automatically. For production use, set a strong secret before starting OpenWA.
 

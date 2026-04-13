@@ -65,9 +65,10 @@ docker build -t openwa:latest .
 ### Run Docker Container
 
 ```bash
-docker run -p 55111:55111 -p 55222:55222 \
-  -e OPENWA_FRONTEND_URL=http://localhost:55111 \
-  -e OPENWA_BACKEND_URL=http://localhost:55222 \
+docker run -p 55111:55111 \
+  -e HOST=0.0.0.0 \
+  -e FE_PORT=55111 \
+  -e BE_PORT=55222 \
   -v openwa-storage:/app/storage \
   openwa:latest
 ```
@@ -82,11 +83,6 @@ HOST=0.0.0.0
 FE_PORT=55111
 BE_PORT=55222
 
-# URL Configuration
-# When exposing OpenWA over a public IP, set these to your external host
-OPENWA_FRONTEND_URL=http://your-server-ip:55111
-OPENWA_BACKEND_URL=http://your-server-ip:55222
-
 # Security
 OPENWA_JWT_SECRET=your-secret-key-here
 
@@ -99,20 +95,20 @@ OPENWA_ALLOW_MOCK=false
 DATABASE_URL=file:./storage/database/openwa.db
 ```
 
+OpenWA will automatically derive frontend and backend URLs from `HOST`, `FE_PORT`, and `BE_PORT`.
+
 ### Environment Variables Explained
 
-| Variable              | Default                           | Purpose                     |
-| --------------------- | --------------------------------- | --------------------------- |
-| `HOST`                | 127.0.0.1                         | Server host address         |
-| `FE_PORT`             | 55111                             | Frontend port               |
-| `BE_PORT`             | 55222                             | Backend API port            |
-| `OPENWA_FRONTEND_URL` | http://localhost:55111            | Frontend URL                |
-| `OPENWA_BACKEND_URL`  | http://localhost:55222            | Backend URL                 |
-| `OPENWA_JWT_SECRET`   | openwa-local-dev-secret           | JWT signing secret          |
-| `OPENWA_AUTO_OPEN`    | true                              | Auto-open browser on start  |
-| `OPENWA_USE_WWEBJS`   | true                              | Enable WhatsApp Web adapter |
-| `OPENWA_ALLOW_MOCK`   | false                             | Allow mock adapter          |
-| `DATABASE_URL`        | file:./storage/database/openwa.db | SQLite database path        |
+| Variable            | Default                           | Purpose                     |
+| ------------------- | --------------------------------- | --------------------------- |
+| `HOST`              | 127.0.0.1                         | Server host address         |
+| `FE_PORT`           | 55111                             | Frontend port               |
+| `BE_PORT`           | 55222                             | Backend API port            |
+| `OPENWA_JWT_SECRET` | openwa-local-dev-secret           | JWT signing secret          |
+| `OPENWA_AUTO_OPEN`  | true                              | Auto-open browser on start  |
+| `OPENWA_USE_WWEBJS` | true                              | Enable WhatsApp Web adapter |
+| `OPENWA_ALLOW_MOCK` | false                             | Allow mock adapter          |
+| `DATABASE_URL`      | file:./storage/database/openwa.db | SQLite database path        |
 
 ## Database Migration
 
