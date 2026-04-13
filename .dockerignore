@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.dockerignore
+.git
+.gitignore
+.vscode
+.idea
+storage/database
+web/.next
+coverage
+logs
+*.log
