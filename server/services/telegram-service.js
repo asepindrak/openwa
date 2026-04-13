@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const { prisma } = require("../database/client");
 const toolCredentialService = require("./tool-credential-service");
+const TelegramConfigService = require("./telegram-config-service");
 const chatService = require("./chat-service");
 const { mediaDir } = require("../utils/paths");
 
@@ -31,19 +32,28 @@ class TelegramService {
 
     bot.on("text", async (ctx) => {
       const telegramChatId = String(ctx.chat.id);
+      const allowedIds = (
+        TelegramConfigService.getConfig(userId)?.adminTelegramIds || []
+      ).map(String);
       const text = ctx.message.text;
 
-      // Find or create a chat for this Telegram chat
-      let chat = await prisma.chat.findFirst({
+      if (allowedIds.length > 0 && !allowedIds.includes(telegramChatId)) {
+        await ctx.reply(
+          "Maaf, akun Telegram Anda belum diizinkan untuk mengontrol OpenWA. Hubungi pemilik untuk menambahkan chat ID Anda.",
+        );
+        return;
+      }
+
+      // Find or create a contact for this Telegram chat
+      let contact = await prisma.contact.findFirst({
         where: {
           userId,
           externalId: `tg:${telegramChatId}`,
         },
       });
 
-      if (!chat) {
-        // Create a contact for the Telegram user
-        const contact = await prisma.contact.create({
+      if (!contact) {
+        contact = await prisma.contact.create({
           data: {
             userId,
             externalId: `tg:${telegramChatId}`,
@@ -51,13 +61,36 @@ class TelegramService {
             avatarUrl: null,
           },
         });
+      }
 
+      const normalizedText = String(text || "").trim();
+      if (normalizedText.toLowerCase() === "/new") {
+        const newChat = await chatService.createAssistantConversation(
+          userId,
+          {},
+        );
+        if (ioInstance) {
+          ioInstance.to(`user:${userId}`).emit("contact_list_update", newChat);
+        }
+        await ctx.reply(
+          "Konteks baru telah dimulai. Saya membuat sesi assistant baru untuk Anda.",
+        );
+        return;
+      }
+
+      // Find or create a chat linked to that contact
+      let chat = await prisma.chat.findFirst({
+        where: {
+          userId,
+          contactId: contact.id,
+        },
+      });
+
+      if (!chat) {
         chat = await prisma.chat.create({
           data: {
             userId,
-            externalId: `tg:${telegramChatId}`,
             title: contact.displayName,
-            transportType: "telegram",
             contactId: contact.id,
           },
         });
@@ -115,6 +148,10 @@ class TelegramService {
       } catch (e) {}
       delete bots[userId];
     }
+  }
+
+  static isBotRunning(userId) {
+    return Boolean(bots[userId]);
   }
 
   static async stopAll() {

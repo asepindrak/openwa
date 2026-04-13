@@ -575,7 +575,23 @@ export const ChatWindow = forwardRef(function ChatWindow(
     };
   }, [emojiPickerOpen, shortcutMenuOpen, aiMenuOpen]);
 
+  const isAssistantChat = Boolean(
+    chat?.contact?.externalId &&
+    (chat.contact.externalId === "openwa:assistant" ||
+      String(chat.contact.externalId).startsWith("openwa:assistant") ||
+      String(chat.contact.externalId).endsWith(":assistant")),
+  );
+
   const shortcuts = [
+    ...(isAssistantChat
+      ? [
+          {
+            label: "New Assistant Chat",
+            message: "/new",
+            icon: "✨",
+          },
+        ]
+      : []),
     {
       label: "Latest Messages",
       message: "Show me the latest messages from my WhatsApp chats",

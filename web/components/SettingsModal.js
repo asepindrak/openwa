@@ -173,6 +173,8 @@ export function SettingsModal({
   const [showApiKey, setShowApiKey] = useState(false);
   const [addingProvider, setAddingProvider] = useState(false);
   const [modelsMap, setModelsMap] = useState({});
+  const [registerAllowed, setRegisterAllowed] = useState(true);
+  const [registerLoading, setRegisterLoading] = useState(false);
   const [modelsLoadingId, setModelsLoadingId] = useState(null);
   const [manualModelByProvider, setManualModelByProvider] = useState({});
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -220,6 +222,25 @@ export function SettingsModal({
         // ignore
       } finally {
         if (mounted) setProvidersLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [open, token]);
+
+  useEffect(() => {
+    if (!open) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const data = await apiFetch("/api/auth/config", { token });
+        if (!mounted) return;
+        setRegisterAllowed(data.allowRegistration !== false);
+      } catch (e) {
+        if (!mounted) return;
+        setRegisterAllowed(true);
       }
     })();
 
@@ -1070,6 +1091,49 @@ export function SettingsModal({
                     "auto" will be executed immediately without checking the
                     host allowlist. Use with caution.
                   </p>
+
+                  <div className="mt-4 flex items-center justify-between">
+                    <div>
+                      <div className="text-sm text-white">
+                        Allow new registrations
+                      </div>
+                      <div className="text-xs text-white/45">
+                        Toggle whether new users can sign up for this OpenWA
+                        workspace.
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      className={`rounded-full px-3 py-1 text-sm ${registerAllowed ? "bg-emerald-600 text-white" : "bg-white/5 text-white/60"}`}
+                      onClick={async () => {
+                        if (!token) return;
+                        setRegisterLoading(true);
+                        try {
+                          const data = await apiFetch("/api/auth/config", {
+                            method: "POST",
+                            token,
+                            body: { allowRegistration: !registerAllowed },
+                          });
+                          setRegisterAllowed(data.allowRegistration === true);
+                        } catch (error) {
+                          alert(
+                            error.message ||
+                              "Failed to update registration setting",
+                          );
+                        } finally {
+                          setRegisterLoading(false);
+                        }
+                      }}
+                      disabled={registerLoading}
+                    >
+                      {registerLoading
+                        ? "Saving..."
+                        : registerAllowed
+                          ? "Enabled"
+                          : "Disabled"}
+                    </button>
+                  </div>
 
                   <div className="mt-4 flex items-center justify-between">
                     <div>

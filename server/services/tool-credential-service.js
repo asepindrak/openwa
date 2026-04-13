@@ -48,29 +48,31 @@ async function saveCredential(
 ) {
   if (!apiKey) throw new Error("apiKey is required");
   const key = getMasterKey();
-  if (!key)
-    throw new Error(
-      "OPENWA_SECRET or JWT_SECRET must be set to store credentials securely",
-    );
-
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  let enc = cipher.update(String(apiKey), "utf8", "base64");
-  enc += cipher.final("base64");
-  const tag = cipher.getAuthTag();
 
   const store = readStore();
   const storeKey = `${toolId}:${userId}`;
-  store[storeKey] = {
+  const entry = {
     toolId,
     headerName: headerName || "Authorization",
-    secret: enc,
-    iv: iv.toString("base64"),
-    tag: tag.toString("base64"),
     addedBy: userId,
     addedAt: new Date().toISOString(),
   };
 
+  if (key) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+    let enc = cipher.update(String(apiKey), "utf8", "base64");
+    enc += cipher.final("base64");
+    const tag = cipher.getAuthTag();
+
+    entry.secret = enc;
+    entry.iv = iv.toString("base64");
+    entry.tag = tag.toString("base64");
+  } else {
+    entry.plaintext = String(apiKey);
+  }
+
+  store[storeKey] = entry;
   writeStore(store);
   return { ok: true };
 }
@@ -80,8 +82,18 @@ async function getCredentialForUser(userId, toolId) {
   const storeKey = `${toolId}:${userId}`;
   const entry = store[storeKey];
   if (!entry) return null;
+
+  if (entry.plaintext) {
+    return {
+      apiKey: entry.plaintext,
+      headerName: entry.headerName,
+      addedBy: entry.addedBy,
+      addedAt: entry.addedAt,
+    };
+  }
+
   const key = getMasterKey();
-  if (!key) return null;
+  if (!key || !entry.secret || !entry.iv || !entry.tag) return null;
   try {
     const iv = Buffer.from(entry.iv, "base64");
     const tag = Buffer.from(entry.tag, "base64");

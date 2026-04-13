@@ -33,18 +33,20 @@ function sanitizeUser(user) {
     id: user.id,
     name: user.name,
     email: user.email,
-    createdAt: user.createdAt
+    createdAt: user.createdAt,
   };
 }
 
 function issueToken(user, config) {
   return jwt.sign({ sub: user.id, email: user.email }, config.jwtSecret, {
-    expiresIn: "7d"
+    expiresIn: "7d",
   });
 }
 
 async function registerUser({ name, email, password, config }) {
-  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
 
   if (!name || !normalizedEmail || !password) {
     throw new Error("Name, email, and password are required.");
@@ -52,8 +54,8 @@ async function registerUser({ name, email, password, config }) {
 
   const existingUser = await retryOnSqliteTimeout(() =>
     prisma.user.findUnique({
-      where: { email: normalizedEmail }
-    })
+      where: { email: normalizedEmail },
+    }),
   );
 
   if (existingUser) {
@@ -65,22 +67,24 @@ async function registerUser({ name, email, password, config }) {
     data: {
       name: String(name).trim(),
       email: normalizedEmail,
-      passwordHash
-    }
+      passwordHash,
+    },
   });
 
   return {
     token: issueToken(user, config),
-    user: sanitizeUser(user)
+    user: sanitizeUser(user),
   };
 }
 
 async function loginUser({ email, password, config }) {
-  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
   const user = await retryOnSqliteTimeout(() =>
     prisma.user.findUnique({
-      where: { email: normalizedEmail }
-    })
+      where: { email: normalizedEmail },
+    }),
   );
 
   if (!user) {
@@ -94,8 +98,37 @@ async function loginUser({ email, password, config }) {
 
   return {
     token: issueToken(user, config),
-    user: sanitizeUser(user)
+    user: sanitizeUser(user),
   };
+}
+
+async function resetPassword({ email, password }) {
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
+  const user = await retryOnSqliteTimeout(() =>
+    prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    }),
+  );
+
+  if (!user) {
+    throw new Error("User not found.");
+  }
+
+  if (!password) {
+    throw new Error("Password is required.");
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  await retryOnSqliteTimeout(() =>
+    prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    }),
+  );
+
+  return sanitizeUser(user);
 }
 
 async function getUserFromToken(token, config) {
@@ -106,8 +139,8 @@ async function getUserFromToken(token, config) {
   const payload = jwt.verify(token, config.jwtSecret);
   const user = await retryOnSqliteTimeout(() =>
     prisma.user.findUnique({
-      where: { id: payload.sub }
-    })
+      where: { id: payload.sub },
+    }),
   );
 
   return user ? sanitizeUser(user) : null;
@@ -118,24 +151,36 @@ function createAuthMiddleware(config, { allowApiKey = true } = {}) {
     try {
       const header = req.headers.authorization || "";
       const bearerValue = header.startsWith("Bearer ") ? header.slice(7) : null;
-      const headerApiKey = req.headers["x-api-key"] || req.headers["x-openwa-api-key"] || null;
-      const apiKey = allowApiKey ? headerApiKey || (String(bearerValue || "").startsWith("owa_live_") ? bearerValue : null) : null;
+      const headerApiKey =
+        req.headers["x-api-key"] || req.headers["x-openwa-api-key"] || null;
+      const apiKey = allowApiKey
+        ? headerApiKey ||
+          (String(bearerValue || "").startsWith("owa_live_")
+            ? bearerValue
+            : null)
+        : null;
       const token = apiKey ? null : bearerValue;
 
       if (!token && !apiKey) {
         return res.status(401).json({ error: "Authentication required." });
       }
 
-      const user = apiKey ? await getUserFromApiKey(apiKey) : await getUserFromToken(token, config);
+      const user = apiKey
+        ? await getUserFromApiKey(apiKey)
+        : await getUserFromToken(token, config);
       if (!user) {
-        return res.status(401).json({ error: apiKey ? "Invalid API key." : "Invalid token." });
+        return res
+          .status(401)
+          .json({ error: apiKey ? "Invalid API key." : "Invalid token." });
       }
 
       req.user = user;
       return next();
     } catch (error) {
       if (isSqliteTimeoutError(error)) {
-        return res.status(503).json({ error: "Database is busy. Please try again." });
+        return res
+          .status(503)
+          .json({ error: "Database is busy. Please try again." });
       }
 
       return res.status(401).json({ error: error.message });
@@ -158,5 +203,6 @@ module.exports = {
   isSqliteTimeoutError,
   loginUser,
   registerUser,
-  sanitizeUser
+  resetPassword,
+  sanitizeUser,
 };

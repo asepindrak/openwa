@@ -65,13 +65,23 @@ function mapMessage(message) {
   };
 }
 
+function getChatTransportType(contactExternalId) {
+  const normalized = String(contactExternalId || "").toLowerCase();
+  if (normalized.startsWith("tg:")) return "telegram";
+  if (normalized.endsWith("@c.us") || normalized.endsWith("@g.us"))
+    return "whatsapp";
+  return null;
+}
+
 function mapChat(chat) {
   const lastMessage = chat.messages?.[0] ? mapMessage(chat.messages[0]) : null;
+  const transportType = getChatTransportType(chat.contact.externalId);
   return {
     id: chat.id,
     title: chat.title,
     sessionId: chat.sessionId,
     pinnedAt: chat.pinnedAt || null,
+    transportType,
     contact: {
       id: chat.contact.id,
       externalId: chat.contact.externalId,

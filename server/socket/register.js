@@ -44,7 +44,20 @@ function registerSocketHandlers({ io, config, sessionManager }) {
         );
         const externalId = chat?.contact?.externalId || null;
 
-        if (isAssistantExternalId(externalId)) {
+        const normalizedBody = String(payload.body || "").trim();
+        if (
+          isAssistantExternalId(externalId) &&
+          normalizedBody.toLowerCase() === "/new"
+        ) {
+          const newChat = await chatService.createAssistantConversation(
+            socket.user.id,
+            {},
+          );
+          io.to(userRoom(socket.user.id)).emit("contact_list_update", newChat);
+          if (ack) {
+            ack({ ok: true, chat: newChat });
+          }
+        } else if (isAssistantExternalId(externalId)) {
           // store outgoing message and let agent handle reply
           await agentService.handleAssistantMessage(
             socket.user.id,

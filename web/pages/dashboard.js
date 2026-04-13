@@ -678,7 +678,7 @@ export default function DashboardPage() {
       throw new Error("Socket connection is not ready yet.");
     }
 
-    await new Promise((resolve, reject) => {
+    const response = await new Promise((resolve, reject) => {
       socket.emit(
         "send_message",
         {
@@ -689,7 +689,7 @@ export default function DashboardPage() {
         },
         (response) => {
           if (response?.ok) {
-            resolve(response.message);
+            resolve(response);
             return;
           }
 
@@ -697,6 +697,13 @@ export default function DashboardPage() {
         },
       );
     });
+
+    if (response?.chat && response.chat.id) {
+      upsertChat(response.chat);
+      setActiveChat(response.chat.id);
+    }
+
+    return response.message;
   };
 
   const handleSendMedia = async ({ file, caption }) => {

@@ -9,12 +9,33 @@ export default function HomePage() {
   const router = useRouter();
   const { token, hydrateAuth, setAuth } = useAppStore();
   const [mode, setMode] = useState("login");
+  const [registerAllowed, setRegisterAllowed] = useState(true);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     hydrateAuth();
   }, [hydrateAuth]);
+
+  useEffect(() => {
+    let mounted = true;
+    apiFetch("/api/auth/config")
+      .then((data) => {
+        if (!mounted) return;
+        setRegisterAllowed(data.allowRegistration !== false);
+        if (data.allowRegistration === false && mode === "register") {
+          setMode("login");
+        }
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setRegisterAllowed(true);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (token) {
@@ -26,10 +47,16 @@ export default function HomePage() {
     setSubmitting(true);
     setError("");
 
+    if (mode === "register" && !registerAllowed) {
+      setError("Registration is currently disabled.");
+      setSubmitting(false);
+      return;
+    }
+
     try {
       const result = await apiFetch(`/api/auth/${mode}`, {
         method: "POST",
-        body: values
+        body: values,
       });
 
       setAuth(result);
@@ -53,7 +80,11 @@ export default function HomePage() {
           mode={mode}
           error={error}
           busy={submitting}
-          onModeChange={setMode}
+          registerAllowed={registerAllowed}
+          onModeChange={(nextMode) => {
+            if (nextMode === "register" && !registerAllowed) return;
+            setMode(nextMode);
+          }}
           onSubmit={handleSubmit}
         />
       </main>

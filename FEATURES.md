@@ -3,12 +3,14 @@
 This document lists all features available in OpenWA, extracted from the API specification.
 
 ## Authentication
+
 - Register new workspace account
 - Login to existing account
 - JWT bearer token authentication for dashboard users
 - API key authentication for agents and external integrations
 
 ## Workspace
+
 - Bootstrap endpoint for initial data load
 - Load current user information
 - Load list of sessions
@@ -17,6 +19,7 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Load initial messages for active chat
 
 ## Sessions (Multi-device Management)
+
 - Create new WhatsApp session
 - Connect/pair session with WhatsApp via QR code
 - Disconnect/logout session
@@ -26,6 +29,7 @@ This document lists all features available in OpenWA, extracted from the API spe
 - QR code generation for mobile authentication
 
 ## Contacts
+
 - Browse all contacts
 - Search contacts by name, phone number, or message preview
 - Open contact to start new chat
@@ -35,6 +39,7 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Last message timestamp
 
 ## Chats
+
 - Browse all chats (conversations)
 - Search chats by contact name, title, or message content
 - Open chat to view messages
@@ -44,6 +49,7 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Chat status and timestamps
 
 ## Messages
+
 - List messages in a chat
 - Search messages within chat
 - Send text messages
@@ -58,12 +64,14 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Sender and receiver information
 
 ## Media
+
 - Multipart media file upload
 - Media file storage with file paths
 - Media association with messages via mediaFileId
 - Support for images, videos, documents, audio files
 
 ## Runtime Documentation
+
 - Swagger UI for interactive API exploration
 - OpenAPI 3.1.0 specification JSON
 - Agent-friendly README documentation
@@ -72,6 +80,7 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Runtime metadata
 
 ## Real-time Updates
+
 - Socket.IO connection for real-time message updates
 - Typing indicators
 - Online status
@@ -81,6 +90,7 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Contact updates
 
 ## Additional Features
+
 - Local-first architecture
 - Self-hosted deployment
 - CLI package format
@@ -89,6 +99,7 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Prisma ORM with SQLite database
 - Multi-user support
 - Multi-session support per user
+- Remote OpenWA control via Telegram bot with admin allowlist and `/new` chat reset support
 - Dark theme UI
 - Search functionality across messages, chats, and contacts
 - Message grouping (consecutive images)

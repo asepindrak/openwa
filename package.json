@@ -26,7 +26,7 @@
     "openwa": "bin/openwa.js"
   },
   "scripts": {
-    "dev": "node bin/openwa.js --dev",
+    "dev": "nodemon --watch server --watch bin --ext js --exec \"node bin/openwa.js --dev\"",
     "start": "node bin/openwa.js",
     "pack": "npm run build && npm pack",
     "build": "node ./node_modules/prisma/build/index.js generate --schema prisma/schema.prisma && npm run build:web",
@@ -75,6 +75,7 @@
   },
   "devDependencies": {
     "autoprefixer": "^10.4.20",
+    "nodemon": "^3.1.14",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17"
   },

@@ -23,6 +23,7 @@ const toolExecutor = require("./tool-executor");
 const { prisma } = require("../database/client");
 const { v4: uuidv4 } = require("uuid");
 const toolCredentialService = require("./tool-credential-service");
+const TelegramConfigService = require("./telegram-config-service");
 const TelegramService = require("./telegram-service");
 const userSettings = require("./user-settings");
 const QRCode = require("qrcode");
@@ -502,6 +503,36 @@ function tryParseJsonObject(text) {
   }
 }
 
+function parseProviderSetupInput(text) {
+  const payload = tryParseJsonObject(text);
+  if (!payload || typeof payload !== "object") return null;
+
+  const provider = String(payload.provider || payload.providerId || "").trim();
+  const name = String(payload.name || provider || "").trim();
+  const apiKey = String(
+    payload.config?.apiKey || payload.apiKey || payload.key || "",
+  ).trim();
+  const model = String(
+    payload.defaultModel || payload.model || payload.defaultAiModel || "",
+  ).trim();
+  const host = String(
+    payload.config?.host || payload.host || payload.endpoint || "",
+  ).trim();
+
+  if (!provider || !apiKey) return null;
+
+  return {
+    provider,
+    name,
+    config: {
+      apiKey,
+      ...(payload.config || {}),
+      ...(host ? { host } : {}),
+    },
+    defaultModel: model || null,
+  };
+}
+
 const APP_LAUNCH_INTENT_RE =
   /\b(?:buka(?:kan)?|open|jalankan|run|launch|start)\b/i;
 const WINDOWS_APP_COMMANDS = {
@@ -663,6 +694,12 @@ function buildAssistantSystemPrompt({
   );
   parts.push(
     "6. WhatsApp Automation: When adding a new device with 'add_device', the tool will automatically handle session connection, QR code generation, and wait for the user to scan. Once the tool returns successfully, the device is ALREADY connected and sync is complete. You MUST NOT ask the user to connect or scan again. Simply confirm the connection and ask what to do next.",
+  );
+  parts.push(
+    "7. AI Provider Setup: If no AI provider is configured, ask the user for the provider name, API key, and desired model. Use `add_llm_provider` to save the provider, then persist defaults with `set_default_ai_provider`, `set_default_ai_model`, or `set_ai_defaults`.",
+  );
+  parts.push(
+    "8. Telegram Setup: Ask the user to create a bot with BotFather and paste the bot token. Use `setup_telegram_bot` with the token to start the bot. If they want access restricted, configure admin Telegram IDs later with `configure_telegram_admins`.",
   );
   parts.push("");
   parts.push(`Available tools: ${toolsList}.`);
@@ -1059,13 +1096,109 @@ const tools = {
   add_llm_provider: async (userId, args) => {
     const provider = String(args.provider || "").toLowerCase();
     const name = String(args.name || provider || "Provider");
-    const cfg = args.config || {};
+    const cfg = Object.assign({}, args.config || {});
+    if (args.host) {
+      cfg.host = String(args.host || "").trim();
+    }
     const created = await aiProviderService.createProvider(userId, {
       provider,
       name,
       config: cfg,
     });
     return { ok: true, provider: created };
+  },
+  set_default_ai_provider: async (userId, args) => {
+    const providerId = String(
+      args.providerId || args.id || args.provider || "",
+    ).trim();
+    if (!providerId) throw new Error("providerId is required.");
+
+    const provider = await aiProviderService.getProvider(userId, providerId);
+    if (!provider) throw new Error("AI provider not found.");
+
+    await userSettings.setSetting(userId, "defaultAiProviderId", providerId);
+    return {
+      ok: true,
+      defaultAiProviderId: providerId,
+      message: `Default AI provider set to ${provider.name}.`,
+    };
+  },
+  set_default_ai_model: async (userId, args) => {
+    const model = String(
+      args.model || args.defaultModel || args.defaultAiModel || "",
+    ).trim();
+    if (!model) throw new Error("model is required.");
+
+    await userSettings.setSetting(userId, "defaultAiModel", model);
+    return {
+      ok: true,
+      defaultAiModel: model,
+      message: `Default AI model set to ${model}.`,
+    };
+  },
+  set_ai_defaults: async (userId, args) => {
+    const providerId = String(
+      args.providerId || args.id || args.provider || "",
+    ).trim();
+    const model = String(
+      args.model || args.defaultModel || args.defaultAiModel || "",
+    ).trim();
+    if (!providerId && !model) {
+      throw new Error("At least one of providerId or model is required.");
+    }
+
+    const result = { ok: true, updated: {} };
+
+    if (providerId) {
+      const provider = await aiProviderService.getProvider(userId, providerId);
+      if (!provider) throw new Error("AI provider not found.");
+      await userSettings.setSetting(userId, "defaultAiProviderId", providerId);
+      result.updated.defaultAiProviderId = providerId;
+      result.updated.message = `Default AI provider set to ${provider.name}.`;
+    }
+
+    if (model) {
+      await userSettings.setSetting(userId, "defaultAiModel", model);
+      result.updated.defaultAiModel = model;
+      result.updated.message = `Default AI model set to ${model}.`;
+    }
+
+    return {
+      ok: true,
+      ...result,
+    };
+  },
+  get_default_ai_provider: async (userId) => {
+    const providerId = await userSettings.getSetting(
+      userId,
+      "defaultAiProviderId",
+    );
+    const defaultAiModel = await userSettings.getSetting(
+      userId,
+      "defaultAiModel",
+    );
+
+    let provider = null;
+    if (providerId) {
+      provider = await aiProviderService.getProvider(userId, providerId);
+      if (provider) {
+        provider = {
+          id: provider.id,
+          provider: provider.provider,
+          name: provider.name,
+          config: {
+            host: provider.config?.host || null,
+          },
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      defaultAiProviderId: providerId || null,
+      defaultAiModel: defaultAiModel || null,
+      provider,
+    };
   },
   update_assistant: async (userId, args) => {
     const { displayName, avatarUrl, persona } = args || {};
@@ -1322,6 +1455,15 @@ const tools = {
     const token = String(args.token || args.botToken || "").trim();
     if (!token) throw new Error("Telegram Bot Token is required.");
 
+    const adminIdsArg =
+      args.adminTelegramIds || args.adminIds || args.admin || [];
+    const normalizedAdminIds = Array.isArray(adminIdsArg)
+      ? adminIdsArg.map((v) => String(v).trim()).filter(Boolean)
+      : String(adminIdsArg)
+          .split(/[,;\s]+/)
+          .map((v) => String(v).trim())
+          .filter(Boolean);
+
     // Validate token by starting the bot
     try {
       await TelegramService.startBot(userId, token);
@@ -1337,10 +1479,61 @@ const tools = {
       headerName: "X-Telegram-Bot-Token",
     });
 
+    if (normalizedAdminIds.length > 0) {
+      TelegramConfigService.saveConfig(userId, {
+        adminTelegramIds: normalizedAdminIds,
+      });
+    }
+
     return {
       ok: true,
       message:
-        "Telegram Bot has been successfully set up and is now running. You can now remote OpenWA via your Telegram bot.",
+        normalizedAdminIds.length > 0
+          ? `Telegram Bot is running now, and the authorized Telegram chat IDs have been saved: ${normalizedAdminIds.join(", ")}. You can now control OpenWA using the bot from those chats.`
+          : "Telegram Bot is running now, and the token has been saved. You can now remote OpenWA via your Telegram bot. If you want to restrict access later, send the admin chat IDs using configure_telegram_admins.",
+      adminTelegramIds: normalizedAdminIds,
+    };
+  },
+  configure_telegram_admins: async (userId, args) => {
+    const adminIdsArg =
+      args.adminTelegramIds || args.adminIds || args.admin || [];
+    const normalizedAdminIds = Array.isArray(adminIdsArg)
+      ? adminIdsArg.map((v) => String(v).trim()).filter(Boolean)
+      : String(adminIdsArg)
+          .split(/[,;\s]+/)
+          .map((v) => String(v).trim())
+          .filter(Boolean);
+
+    if (normalizedAdminIds.length === 0) {
+      throw new Error(
+        "adminTelegramIds is required and must contain at least one Telegram chat ID.",
+      );
+    }
+
+    const savedConfig = TelegramConfigService.saveConfig(userId, {
+      adminTelegramIds: normalizedAdminIds,
+    });
+    return {
+      ok: true,
+      adminTelegramIds: savedConfig.adminTelegramIds,
+      message: `Telegram admin chat IDs have been saved: ${savedConfig.adminTelegramIds.join(", ")}.`,
+    };
+  },
+  get_telegram_bot_status: async (userId) => {
+    const savedToken = await toolCredentialService.getCredentialForUser(
+      userId,
+      "telegram_bot",
+    );
+    const isRunning = TelegramService.isBotRunning(userId);
+    return {
+      ok: true,
+      botConfigured: Boolean(savedToken && savedToken.apiKey),
+      botRunning: isRunning,
+      message: isRunning
+        ? "Telegram bot is currently running."
+        : savedToken && savedToken.apiKey
+          ? "Telegram bot is configured but not currently running. Restart the OpenWA process to launch it, or call setup_telegram_bot again."
+          : "Telegram bot has not been configured yet.",
     };
   },
 };
@@ -1568,8 +1761,64 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
   if (!directToolCall) {
     providerId = await chooseProviderId(userId);
     if (!providerId) {
+      const setupInfo = parseProviderSetupInput(assistantInput.body);
+      if (setupInfo) {
+        try {
+          const created = await aiProviderService.createProvider(userId, {
+            provider: setupInfo.provider,
+            name: setupInfo.name,
+            config: setupInfo.config,
+          });
+          await userSettings.setSetting(
+            userId,
+            "defaultAiProviderId",
+            created.id,
+          );
+          if (setupInfo.defaultModel) {
+            await userSettings.setSetting(
+              userId,
+              "defaultAiModel",
+              setupInfo.defaultModel,
+            );
+          }
+
+          const body =
+            `AI provider configured successfully. Provider '${created.name}' is now set as the default.` +
+            (setupInfo.defaultModel
+              ? ` Default model '${setupInfo.defaultModel}' is saved.`
+              : "");
+          const assistantMsg = await chatService.storeIncomingMessage({
+            userId,
+            sessionId: null,
+            sender: assistantSender,
+            displayName: assistantDisplayName,
+            body,
+          });
+          io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
+          io.to(`user:${userId}`).emit(
+            "contact_list_update",
+            assistantMsg.chat,
+          );
+          return;
+        } catch (err) {
+          const assistantMsg = await chatService.storeIncomingMessage({
+            userId,
+            sessionId: null,
+            sender: assistantSender,
+            displayName: assistantDisplayName,
+            body: `Failed to configure AI provider: ${err.message}`,
+          });
+          io.to(`user:${userId}`).emit("new_message", assistantMsg.message);
+          io.to(`user:${userId}`).emit(
+            "contact_list_update",
+            assistantMsg.chat,
+          );
+          return;
+        }
+      }
+
       const help =
-        "No AI provider configured. Please add an LLM provider in Settings or ask me to add one.";
+        'No AI provider configured. Please set up a provider using the following JSON format in chat:\n```json\n{\n  "provider": "openai",\n  "name": "OpenAI",\n  "config": {\n    "apiKey": "sk-...",\n    "host": "https://api.openai.com"\n  },\n  "defaultModel": "gpt-5-mini"\n}\n```\nIf you prefer, just ask me to configure the provider and I will guide you step by step.';
       const assistantMsg = await chatService.storeIncomingMessage({
         userId,
         sessionId: null,
@@ -1991,13 +2240,15 @@ async function sendAssistantMessage(
     }
 
     // If the chat is a Telegram chat, send to Telegram as well
-    if (
+    const isTelegramChat =
       assistantMsg &&
       assistantMsg.chat &&
-      assistantMsg.chat.transportType === "telegram"
-    ) {
+      (assistantMsg.chat.transportType === "telegram" ||
+        String(assistantMsg.chat?.contact?.externalId || "").startsWith("tg:"));
+
+    if (isTelegramChat) {
       const telegramId = TelegramService.extractTelegramId(
-        assistantMsg.chat.externalId,
+        assistantMsg.chat.contact.externalId,
       );
       if (telegramId) {
         if (assistantMsg.message.mediaFileId) {

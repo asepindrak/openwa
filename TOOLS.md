@@ -12,6 +12,9 @@ Default skills
 - `create_api_key` — Generate an API key for the user.
 - `update_webhook` — Set incoming webhook URL and key.
 - `update_tools_md` — Append or update human-readable entries in this file when new external tools are registered.
+- `setup_telegram_bot` — Set up a Telegram bot with a BotFather token so OpenWA can be remotely controlled via Telegram.
+- `configure_telegram_admins` — Save authorized Telegram chat IDs to restrict which Telegram users may control OpenWA.
+- `get_telegram_bot_status` — Check whether the Telegram bot is currently configured and running.
 - `get_webpage` — Fetch and read the content of a URL (static or dynamic).
 - `open_browser` — Open a browser to read a URL, useful for JavaScript-heavy sites.
 - `list_workspaces` — List all project folders inside the global workspaces directory.
@@ -26,6 +29,41 @@ Detailed examples for commonly-used tools
 
   ```json
   { "url": "https://example.com" }
+  ```
+
+- `setup_telegram_bot` (setup_telegram_bot)
+
+  Description: configures and starts the Telegram bot using a BotFather token, enabling remote OpenWA control from Telegram chats.
+
+  Example request:
+
+  ```json
+  {
+    "token": "<telegram-bot-token>",
+    "adminTelegramIds": ["123456789"]
+  }
+  ```
+
+- `configure_telegram_admins` (configure_telegram_admins)
+
+  Description: saves authorized Telegram chat IDs that are allowed to send commands to the OpenWA Telegram bot.
+
+  Example request:
+
+  ```json
+  {
+    "adminTelegramIds": ["123456789", "987654321"]
+  }
+  ```
+
+- `get_telegram_bot_status` (get_telegram_bot_status)
+
+  Description: checks whether the Telegram bot is configured and whether it is currently running.
+
+  Example request:
+
+  ```json
+  {}
   ```
 
 - `open_browser` (open_browser)

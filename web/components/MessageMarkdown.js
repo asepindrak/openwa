@@ -3,19 +3,28 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 
+function flattenChildren(children) {
+  if (typeof children === "string" || typeof children === "number") {
+    return String(children);
+  }
+
+  if (Array.isArray(children)) {
+    return children.map(flattenChildren).join("");
+  }
+
+  if (children && typeof children === "object") {
+    if (children.props && children.props.children) {
+      return flattenChildren(children.props.children);
+    }
+    return "";
+  }
+
+  return "";
+}
+
 function CodeBlock({ inline, className, children, ...props }) {
   const [copied, setCopied] = useState(false);
-  const rawContent = Array.isArray(children)
-    ? children
-        .map((item) =>
-          typeof item === "string" || typeof item === "number"
-            ? String(item)
-            : "",
-        )
-        .join("")
-    : typeof children === "string" || typeof children === "number"
-      ? String(children)
-      : "";
+  const rawContent = flattenChildren(children);
   const content = rawContent.replace(/\n$/, "");
   const language = String(className || "")
     .replace(/^language-/, "")

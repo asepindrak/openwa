@@ -19,7 +19,9 @@ const llmService = require("../services/llm-service");
 const agentService = require("../services/agent-service");
 const terminalService = require("../services/terminal-service");
 const toolCredentialService = require("../services/tool-credential-service");
+const authConfigService = require("../services/auth-config-service");
 const userSettings = require("../services/user-settings");
+const { prisma } = require("../database/client");
 const {
   createAgentReadme,
   createOpenApiDocument,
@@ -193,6 +195,15 @@ function createApp({ config, sessionManager }) {
 
   app.post("/api/auth/register", async (req, res) => {
     try {
+      const userCount = await prisma.user.count();
+      const authConfig = authConfigService.getConfig();
+
+      if (userCount > 0 && !authConfig.allowRegistration) {
+        return res.status(403).json({
+          error: "Registration is currently disabled.",
+        });
+      }
+
       const result = await registerUser({
         ...req.body,
         config,
@@ -209,6 +220,40 @@ function createApp({ config, sessionManager }) {
       });
     }
   });
+
+  app.get("/api/auth/config", async (req, res) => {
+    try {
+      const userCount = await prisma.user.count();
+      const authConfig = authConfigService.getConfig();
+      const allowRegistration =
+        userCount === 0 ? true : !!authConfig.allowRegistration;
+      res.json({ allowRegistration });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post(
+    "/api/auth/config",
+    requireAuth,
+    withAsync(async (req, res) => {
+      try {
+        const allowRegistration = req.body?.allowRegistration;
+        if (typeof allowRegistration !== "boolean") {
+          throw new Error(
+            "allowRegistration is required and must be a boolean.",
+          );
+        }
+
+        const authConfig = authConfigService.saveConfig({
+          allowRegistration,
+        });
+        res.json({ ok: true, allowRegistration: authConfig.allowRegistration });
+      } catch (error) {
+        res.status(400).json({ error: error.message });
+      }
+    }),
+  );
 
   app.post("/api/auth/login", async (req, res) => {
     try {

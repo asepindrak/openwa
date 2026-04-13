@@ -27,7 +27,25 @@ If you use OpenWA with WhatsApp, make sure your usage complies with the terms, p
   - JWT bearer auth for dashboard users.
   - API key auth for agents and external integrations.
 - **Built-in AI Assistant** with extensible tool capabilities.
+- Remote control via Telegram bot integration, including BotFather token setup and admin allowlist support.
 - **Agent-friendly architecture** with machine-readable documentation and tool registration.
+
+## Screenshots
+
+<p align="center">
+  <img src="./Screenshot-1.png" alt="OpenWA screenshot 1" width="720" />
+</p>
+
+<p align="center">
+  <img src="./Screenshot-2.png" alt="OpenWA screenshot 2" width="720" />
+</p>
+
+## Telegram Bot Integration
+
+- Setup a Telegram bot using a BotFather token and connect it to OpenWA.
+- Restrict bot control to specific Telegram chat IDs with admin allowlist support.
+- Use `/new` from Telegram to start a fresh assistant chat context.
+- Monitor the bot status via the assistant tool `get_telegram_bot_status`.
 
 ## Tech stack
 
@@ -69,6 +87,23 @@ npm run build
 npm start
 ```
 
+## CLI reset commands
+
+OpenWA includes a built-in reset helper for administration tasks.
+
+```bash
+openwa reset
+```
+
+When you run `openwa reset`, you can choose:
+
+- `1)` Reset Password — set a new password for an existing user by email.
+- `2)` Reset All Data — delete all runtime data under the OpenWA data directory and recreate runtime folders.
+
+## First-run registration behavior
+
+On first startup, OpenWA allows registration for the initial admin user. After the first user is created, registration is automatically blocked unless `allowRegistration` is explicitly enabled again via **Settings**.
+
 ## Default runtime
 
 By default, OpenWA starts two local services:
@@ -107,6 +142,8 @@ OPENWA_OLLAMA_ENDPOINT=http://localhost:11434
 # Terminal execution security
 OPENWA_TERMINAL_ALLOWLIST=npm run build npm test node --version
 ```
+
+If `OPENWA_JWT_SECRET` is not set, the first `openwa` run will prompt you to enter it and will save it into `.env` automatically. For production use, set a strong secret before starting OpenWA.
 
 ### Configuration Notes
 

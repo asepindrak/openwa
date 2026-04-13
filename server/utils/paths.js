@@ -72,7 +72,9 @@ function migrateLegacyStorage() {
       }
     }
 
-    // Also migrate a small set of legacy files that were previously stored at project root
+    // Also migrate a small set of legacy files that were previously stored at project root.
+    // These files should be copied into the user data directory, not moved, so the
+    // project-local source remains available for repo workflows and resets.
     const legacyFiles = [
       "TOOLS.md",
       "IDENTITY.md",
@@ -85,14 +87,8 @@ function migrateLegacyStorage() {
         const dest = path.join(storageDir, fname);
         if (fs.existsSync(src) && !fs.existsSync(dest)) {
           ensureDir(storageDir);
-          try {
-            fs.renameSync(src, dest);
-            console.info(`migrated ${fname} from project root to ${dest}`);
-          } catch (err) {
-            // fallback to copy
-            copyRecursiveSync(src, dest);
-            console.info(`copied ${fname} from project root to ${dest}`);
-          }
+          copyRecursiveSync(src, dest);
+          console.info(`copied ${fname} from project root to ${dest}`);
         }
       } catch (err) {
         // ignore file-level migration errors
