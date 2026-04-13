@@ -21,9 +21,12 @@ services:
     networks:
       - dokploy-network
     volumes:
-      - ./storage:/app/storage
+      - openwa-storage:/app/storage
     restart: unless-stopped
 
 networks:
   dokploy-network:
     external: true
+
+volumes:
+  openwa-storage:
