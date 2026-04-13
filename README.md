@@ -87,6 +87,28 @@ npm run build
 npm start
 ```
 
+## Run with Docker Compose
+
+OpenWA also supports running with Docker Compose for a portable local deployment. From the repository root:
+
+```bash
+docker compose up --build
+```
+
+This starts the frontend and backend services together with the configured ports.
+
+To run in detached mode:
+
+```bash
+docker compose up --build -d
+```
+
+To stop and remove the containers:
+
+```bash
+docker compose down
+```
+
 ## CLI reset commands
 
 OpenWA includes a built-in reset helper for administration tasks.
