@@ -137,36 +137,41 @@ Important runtime endpoints such as docs, health, and version are also proxied t
 
 ## Environment configuration
 
-OpenWA reads `.env` from the repository root. These are the runtime variables currently used by the app:
+OpenWA reads `.env` from the repository root.
+
+### CLI / Local install
+
+For local CLI installs, the only required environment variable is:
 
 ```env
-# Server and Frontend
-HOST=127.0.0.1
-# or HOST=0.0.0.0 to bind all network interfaces
-FE_PORT=55111
-BE_PORT=55222
-OPENWA_FRONTEND_URL=http://localhost:55111
-OPENWA_BACKEND_URL=http://localhost:55222
-OPENWA_JWT_SECRET=openwa-local-dev-secret
-
-# Startup behavior
-OPENWA_AUTO_OPEN=true
-
-# WhatsApp adapter
-OPENWA_USE_WWEBJS=true
-OPENWA_ALLOW_MOCK=false
-
-# Assistant and Agent Configuration (Optional)
-OPENWA_LLM_PROVIDER=openai
-OPENWA_OPENAI_API_KEY=sk-...
-OPENWA_ANTHROPIC_API_KEY=...
-OPENWA_OLLAMA_ENDPOINT=http://localhost:11434
-
-# Terminal execution security
-OPENWA_TERMINAL_ALLOWLIST=npm run build npm test node --version
+OPENWA_JWT_SECRET=your_secret_key_here
 ```
 
-If `OPENWA_JWT_SECRET` is not set, the first `openwa` run will prompt you to enter it and will save it into `.env` automatically. For production use, set a strong secret before starting OpenWA.
+The first `openwa` run will prompt you for this secret and save it into `.env` if it is missing.
+
+### Docker / Server deployment
+
+For Docker Compose or server deployment, you can configure additional runtime values in `.env`:
+
+```env
+HOST=0.0.0.0
+FE_PORT=55111
+BE_PORT=55222
+OPENWA_FRONTEND_URL=https://openwa.commitflow.space
+OPENWA_BACKEND_URL=http://openwa:55222
+OPENWA_JWT_SECRET=your_secret_key_here
+OPENWA_AUTO_OPEN=false
+OPENWA_USE_WWEBJS=true
+OPENWA_ALLOW_MOCK=false
+DATABASE_URL=file:./storage/database/openwa.db
+OPENWA_DOMAIN=openwa.commitflow.space
+TRAEFIK_ENTRYPOINT=websecure
+TRAEFIK_TLS=true
+```
+
+For Docker deployment, `OPENWA_FRONTEND_URL` should match the public domain used by Traefik, and `OPENWA_BACKEND_URL` can point to the internal service URL used within the Docker network.
+
+If `OPENWA_JWT_SECRET` is not set, the first `openwa` run will prompt you to enter it and save it into `.env` automatically. For production use, set a strong secret before starting OpenWA.
 
 ### Configuration Notes
 
