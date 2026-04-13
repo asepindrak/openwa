@@ -30,6 +30,7 @@ class SessionManager extends EventEmitter {
     this.manualDisconnects = new Set();
     this.qrPersistTimers = new Map();
     this.queuedQrStates = new Map();
+    this.resetInProgress = false;
   }
 
   async hydrate(sessions) {
@@ -43,6 +44,12 @@ class SessionManager extends EventEmitter {
   }
 
   async connectSession(userId, sessionId, options = {}) {
+    if (this.resetInProgress) {
+      throw new Error(
+        "Session connection disabled while reset is in progress.",
+      );
+    }
+
     const { force = false } = options;
     this.manualDisconnects.delete(sessionId);
     this.clearRetry(sessionId);
@@ -325,14 +332,14 @@ class SessionManager extends EventEmitter {
   }
 
   scheduleReconnect(userId, sessionId, reason) {
-    if (this.retryTimers.has(sessionId)) {
+    if (this.resetInProgress || this.retryTimers.has(sessionId)) {
       return;
     }
 
     const timer = setTimeout(async () => {
       this.retryTimers.delete(sessionId);
 
-      if (this.manualDisconnects.has(sessionId)) {
+      if (this.resetInProgress || this.manualDisconnects.has(sessionId)) {
         return;
       }
 
@@ -411,8 +418,11 @@ class SessionManager extends EventEmitter {
   }
 
   async stopAll() {
+    this.resetInProgress = true;
     for (const [sessionId, existing] of Array.from(this.adapters.entries())) {
       try {
+        this.manualDisconnects.add(sessionId);
+
         if (
           existing?.adapter &&
           typeof existing.adapter.disconnect === "function"
@@ -434,6 +444,7 @@ class SessionManager extends EventEmitter {
       this.clearQueuedQrPersist(sessionId);
       this.adapters.delete(sessionId);
     }
+    this.resetInProgress = false;
   }
 }
 
