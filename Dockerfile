@@ -20,12 +20,34 @@ RUN npm run build
 FROM node:20-slim AS runner
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y openssl ca-certificates \
+RUN apt-get update && apt-get install -y \
+  openssl \
+  ca-certificates \
+  libnss3 \
+  libatk1.0-0 \
+  libatk-bridge2.0-0 \
+  libcups2 \
+  libx11-xcb1 \
+  libxcomposite1 \
+  libxdamage1 \
+  libxrandr2 \
+  libgbm1 \
+  libasound2 \
+  libxss1 \
+  libxshmfence1 \
+  libpango-1.0-0 \
+  libpangocairo-1.0-0 \
+  libgtk-3-0 \
+  libdrm2 \
+  libxext6 \
+  libxrender1 \
+  libglib2.0-0 \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
 COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npm ci --omit=dev
+RUN npx playwright install chromium
 
 # Copy build output and runtime app files
 COPY --from=builder /app/bin ./bin
