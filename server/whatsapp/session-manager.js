@@ -409,6 +409,32 @@ class SessionManager extends EventEmitter {
 
     this.queuedQrStates.delete(sessionId);
   }
+
+  async stopAll() {
+    for (const [sessionId, existing] of Array.from(this.adapters.entries())) {
+      try {
+        if (
+          existing?.adapter &&
+          typeof existing.adapter.disconnect === "function"
+        ) {
+          await existing.adapter.disconnect();
+        }
+      } catch (error) {
+        console.warn(
+          `[SessionManager] Failed to disconnect session ${sessionId}:`,
+          error.message,
+        );
+      }
+      try {
+        existing.adapter?.removeAllListeners();
+      } catch (error) {
+        // ignore
+      }
+      this.clearRetry(sessionId);
+      this.clearQueuedQrPersist(sessionId);
+      this.adapters.delete(sessionId);
+    }
+  }
 }
 
 module.exports = { SessionManager };

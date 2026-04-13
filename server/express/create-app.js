@@ -25,6 +25,7 @@ const terminalService = require("../services/terminal-service");
 const toolCredentialService = require("../services/tool-credential-service");
 const authConfigService = require("../services/auth-config-service");
 const userSettings = require("../services/user-settings");
+const TelegramService = require("../services/telegram-service");
 const { prisma } = require("../database/client");
 const {
   createAgentReadme,
@@ -33,6 +34,7 @@ const {
   packageName,
   packageVersion,
 } = require("./openapi");
+const { initializeDatabase } = require("../database/init");
 const { mediaDir, storageDir, ensureRuntimeDirs } = require("../utils/paths");
 
 function inferMessageType(file) {
@@ -423,14 +425,44 @@ function createApp({ config, sessionManager }) {
         throw new Error("Confirm value must be YES to reset all data.");
       }
 
+      try {
+        await TelegramService.stopAll();
+      } catch (err) {
+        console.warn(
+          "Failed to stop Telegram bots during reset-all:",
+          err.message,
+        );
+      }
+
+      try {
+        await sessionManager.stopAll();
+      } catch (err) {
+        console.warn(
+          "Failed to stop WhatsApp sessions during reset-all:",
+          err.message,
+        );
+      }
+
+      try {
+        await prisma.$disconnect();
+      } catch (err) {
+        console.warn(
+          "Failed to disconnect Prisma during reset-all:",
+          err.message,
+        );
+      }
+
       if (fs.existsSync(storageDir)) {
         fs.rmSync(storageDir, { recursive: true, force: true });
       }
       ensureRuntimeDirs();
 
+      await initializeDatabase();
+
       res.json({
         ok: true,
-        message: "All data has been reset. Restart the app to continue.",
+        message:
+          "All data has been reset. You have been logged out and can now register again.",
       });
     }),
   );

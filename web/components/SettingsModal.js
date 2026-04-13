@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useRouter } from "next/router";
 import { BrandLogo } from "@/components/BrandLogo";
 import { ToolsEditorModal } from "@/components/ToolsEditorModal";
 import TerminalMonitorModal from "@/components/TerminalMonitorModal";
@@ -162,6 +163,8 @@ export function SettingsModal({
   const defaultAiModel = useAppStore((s) => s.defaultAiModel);
   const setDefaultAiProvider = useAppStore((s) => s.setDefaultAiProvider);
   const setDefaultAiModel = useAppStore((s) => s.setDefaultAiModel);
+  const logout = useAppStore((s) => s.logout);
+  const router = useRouter();
 
   const [providers, setProviders] = useState([]);
   const [providersLoading, setProvidersLoading] = useState(false);
@@ -324,7 +327,7 @@ export function SettingsModal({
         token,
         body: { confirm: "YES" },
       });
-      alert("All data has been reset. Please restart OpenWA and log in again.");
+      window.location.reload();
     } catch (err) {
       alert(err.message || "Failed to reset all data");
     } finally {
