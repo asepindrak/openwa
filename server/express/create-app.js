@@ -11,6 +11,7 @@ const {
   loginUser,
   registerUser,
   resetPassword,
+  resetPasswordById,
 } = require("../services/auth-service");
 const apiKeyService = require("../services/api-key-service");
 const chatService = require("../services/chat-service");

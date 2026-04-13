@@ -593,6 +593,16 @@ export const ChatWindow = forwardRef(function ChatWindow(
         ]
       : []),
     {
+      label: "Add WhatsApp Device",
+      message: "Please help me add a new WhatsApp device",
+      icon: "📱",
+    },
+    {
+      label: "Integrate Telegram",
+      message: "How can I remote OpenWA via Telegram?",
+      icon: "🤖",
+    },
+    {
       label: "Latest Messages",
       message: "Show me the latest messages from my WhatsApp chats",
       icon: "💬",
@@ -610,16 +620,6 @@ export const ChatWindow = forwardRef(function ChatWindow(
       icon: "🛠️",
     },
     {
-      label: "Integrate Telegram",
-      message: "How can I remote OpenWA via Telegram?",
-      icon: "🤖",
-    },
-    {
-      label: "Add WhatsApp Device",
-      message: "Please help me add a new WhatsApp device",
-      icon: "📱",
-    },
-    {
       label: "Setup LLM Provider",
       message: "Help me setup an LLM Provider (OpenAI/Anthropic/Ollama)",
       icon: "🧠",
@@ -633,6 +633,11 @@ export const ChatWindow = forwardRef(function ChatWindow(
       label: "Check Workspace",
       message: "Check the contents of my workspace folder",
       icon: "📁",
+    },
+    {
+      label: "Reset Password",
+      message: "/reset_password",
+      icon: "🔒",
     },
     {
       label: "Help / Capabilities",

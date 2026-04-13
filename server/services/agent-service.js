@@ -32,7 +32,7 @@ const QRCode = require("qrcode");
 const pendingPasswordResets = new Map();
 
 function getPasswordResetKey(userId, chatId) {
-  return `${String(userId || "")}::${String(chatId || "")} `;
+  return `${String(userId || "")}::${String(chatId || "")}`;
 }
 
 function getPendingPasswordReset(userId, chatId) {
@@ -50,19 +50,34 @@ function clearPendingPasswordReset(userId, chatId) {
 }
 
 function parseNewPasswordCommand(body) {
-  const match = String(body || "")
-    .trim()
-    .match(/^\s*\/new_password\s+(.+)$/i);
-  return match ? match[1].trim() : null;
+  const text = String(body || "").trim();
+  const match = text.match(/^\s*\/(?:new_password|new-password)\s+(.+)$/i);
+  if (match) return match[1].trim();
+
+  const directMatch = text.match(/(?:password baru|new password|kata sandi|password)[:\s]+(.+)$/i);
+  if (directMatch) return directMatch[1].trim();
+
+  // Accept a plain password string once the reset flow is active
+  if (text && !/\?$/i.test(text) && text.length <= 128) {
+    return text;
+  }
+
+  return null;
 }
 
 function isResetPasswordTrigger(body) {
-  const value = String(body || "").trim();
-  return /^\s*(\/reset_password|reset password)\b/i.test(value);
+  const text = String(body || "").toLowerCase();
+  return (
+    /(?:\/(?:reset_password|reset-password)|\breset password\b|\bpassword reset\b|\blupa password\b|\breset sandi\b|\breset akun\b|\bpassword baru\b)/i.test(
+      text,
+    ) ||
+    (/\breset\b/i.test(text) && /\b(password|sandi|akun)\b/i.test(text))
+  );
 }
 
 function isCancelResetPassword(body) {
-  return /^\s*(\/cancel_reset|cancel reset)\b/i.test(String(body || "").trim());
+  const text = String(body || "").trim();
+  return /^\s*(\/cancel_reset|cancel reset)\b/i.test(text);
 }
 const { fetchWebpage, openBrowser } = require("../utils/browser");
 const OS_NAME_MAP = { win32: "Windows", darwin: "macOS", linux: "Linux" };
@@ -1777,7 +1792,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
         userId,
         "openwa:assistant",
         "OpenWA Assistant",
-        "✅ Your password has been reset successfully.",
+        "✅ Password berhasil direset. Anda sekarang bisa login dengan kata sandi baru tersebut.",
         io,
         chatId,
       );
@@ -1786,7 +1801,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
         userId,
         "openwa:assistant",
         "OpenWA Assistant",
-        `Failed to reset password: ${error.message}`,
+        `Gagal mereset password: ${error.message}`,
         io,
         chatId,
       );
@@ -1799,7 +1814,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
       userId,
       "openwa:assistant",
       "OpenWA Assistant",
-      "I am waiting for your new password. Please reply with /new_password <your-new-password> or /cancel_reset.",
+      "Silakan kirim /new_password <kata sandi baru> atau ketik /cancel_reset untuk membatalkan.",
       io,
       chatId,
     );
@@ -1812,7 +1827,7 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
       userId,
       "openwa:assistant",
       "OpenWA Assistant",
-      "To reset your password, please reply with /new_password <your-new-password>. This will reset the password for the current OpenWA user account.",
+      "Silakan kirim `/new_password <kata sandi baru>` untuk mereset password akun OpenWA ini.",
       io,
       chatId,
     );
