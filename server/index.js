@@ -19,18 +19,28 @@ function shouldProxyToBackend(req) {
     url.pathname === "/health" ||
     url.pathname === "/version" ||
     url.pathname === "/docs" ||
-    url.pathname.startsWith("/docs/")
+    url.pathname.startsWith("/docs/") ||
+    url.pathname === "/api" ||
+    url.pathname.startsWith("/api/")
   );
 }
 
 async function proxyToBackend(req, res, config) {
   const targetUrl = `${config.backendUrl}${req.url}`;
-  const response = await fetch(targetUrl, {
+  const headers = { ...req.headers };
+  delete headers.host;
+
+  const requestInit = {
     method: req.method,
-    headers: {
-      accept: req.headers.accept || "*/*",
-    },
-  });
+    headers,
+    duplex: "half",
+  };
+
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    requestInit.body = req;
+  }
+
+  const response = await fetch(targetUrl, requestInit);
 
   res.statusCode = response.status;
   response.headers.forEach((value, key) => {
