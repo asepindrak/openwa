@@ -131,6 +131,36 @@ async function resetPassword({ email, password }) {
   return sanitizeUser(user);
 }
 
+async function resetPasswordById({ userId, password }) {
+  if (!userId) {
+    throw new Error("User ID is required.");
+  }
+
+  if (!password) {
+    throw new Error("Password is required.");
+  }
+
+  const user = await retryOnSqliteTimeout(() =>
+    prisma.user.findUnique({
+      where: { id: userId },
+    }),
+  );
+
+  if (!user) {
+    throw new Error("User not found.");
+  }
+
+  const passwordHash = await bcrypt.hash(password, 10);
+  await retryOnSqliteTimeout(() =>
+    prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    }),
+  );
+
+  return sanitizeUser(user);
+}
+
 async function getUserFromToken(token, config) {
   if (!token) {
     return null;
@@ -201,8 +231,10 @@ module.exports = {
   dashboardAuthMiddleware,
   getUserFromToken,
   isSqliteTimeoutError,
+  retryOnSqliteTimeout,
   loginUser,
   registerUser,
   resetPassword,
+  resetPasswordById,
   sanitizeUser,
 };

@@ -7,8 +7,10 @@ const {
   authMiddleware,
   dashboardAuthMiddleware,
   isSqliteTimeoutError,
+  retryOnSqliteTimeout,
   loginUser,
   registerUser,
+  resetPassword,
 } = require("../services/auth-service");
 const apiKeyService = require("../services/api-key-service");
 const chatService = require("../services/chat-service");
@@ -30,7 +32,7 @@ const {
   packageName,
   packageVersion,
 } = require("./openapi");
-const { mediaDir } = require("../utils/paths");
+const { mediaDir, storageDir, ensureRuntimeDirs } = require("../utils/paths");
 
 function inferMessageType(file) {
   if (!file?.mimetype) {
@@ -333,11 +335,102 @@ function createApp({ config, sessionManager }) {
     }
   });
 
+  app.post("/api/auth/reset-password-request", async (req, res) => {
+    try {
+      const { email, secret } = req.body || {};
+      if (!email || !secret) {
+        throw new Error("Email and secret are required.");
+      }
+
+      if (secret !== config.jwtSecret) {
+        return res.status(401).json({ error: "Invalid OpenWA secret." });
+      }
+
+      const normalizedEmail = String(email || "")
+        .trim()
+        .toLowerCase();
+      const user = await retryOnSqliteTimeout(() =>
+        prisma.user.findUnique({ where: { email: normalizedEmail } }),
+      );
+
+      if (!user) {
+        throw new Error("User not found.");
+      }
+
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(isSqliteTimeoutError(error) ? 503 : 400).json({
+        error: isSqliteTimeoutError(error)
+          ? "Database is busy. Please try again."
+          : error.message,
+      });
+    }
+  });
+
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const { email, password, secret } = req.body || {};
+      if (!email || !password || !secret) {
+        throw new Error("Email, password, and secret are required.");
+      }
+
+      if (secret !== config.jwtSecret) {
+        return res.status(401).json({ error: "Invalid OpenWA secret." });
+      }
+
+      const result = await resetPassword({ email, password });
+      res.json({ ok: true, user: result });
+    } catch (error) {
+      res.status(isSqliteTimeoutError(error) ? 503 : 400).json({
+        error: isSqliteTimeoutError(error)
+          ? "Database is busy. Please try again."
+          : error.message,
+      });
+    }
+  });
+
   app.get(
     "/api/auth/me",
     requireAuth,
     withAsync(async (req, res) => {
       res.json({ user: req.user });
+    }),
+  );
+
+  app.post(
+    "/api/settings/reset-password",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const { password } = req.body || {};
+      if (!password) {
+        throw new Error("Password is required.");
+      }
+      const user = await resetPasswordById({
+        userId: req.user.id,
+        password,
+      });
+      res.json({ ok: true, user });
+    }),
+  );
+
+  app.post(
+    "/api/settings/reset-all",
+    requireDashboardAuth,
+    withAsync(async (req, res) => {
+      const { confirm } = req.body || {};
+      if (confirm !== "YES") {
+        throw new Error("Confirm value must be YES to reset all data.");
+      }
+
+      if (fs.existsSync(storageDir)) {
+        fs.rmSync(storageDir, { recursive: true, force: true });
+      }
+      ensureRuntimeDirs();
+
+      res.json({
+        ok: true,
+        message: "All data has been reset. Restart the app to continue.",
+      });
     }),
   );
 

@@ -15,6 +15,7 @@ const llmService = require("./llm-service");
 const chatService = require("./chat-service");
 const assistantService = require("./assistant-service");
 const apiKeyService = require("./api-key-service");
+const authService = require("./auth-service");
 const webhookService = require("./webhook-service");
 const sessionService = require("./session-service");
 const terminalService = require("./terminal-service");
@@ -27,6 +28,42 @@ const TelegramConfigService = require("./telegram-config-service");
 const TelegramService = require("./telegram-service");
 const userSettings = require("./user-settings");
 const QRCode = require("qrcode");
+
+const pendingPasswordResets = new Map();
+
+function getPasswordResetKey(userId, chatId) {
+  return `${String(userId || "")}::${String(chatId || "")} `;
+}
+
+function getPendingPasswordReset(userId, chatId) {
+  return pendingPasswordResets.get(getPasswordResetKey(userId, chatId));
+}
+
+function setPendingPasswordReset(userId, chatId) {
+  pendingPasswordResets.set(getPasswordResetKey(userId, chatId), {
+    requestedAt: Date.now(),
+  });
+}
+
+function clearPendingPasswordReset(userId, chatId) {
+  pendingPasswordResets.delete(getPasswordResetKey(userId, chatId));
+}
+
+function parseNewPasswordCommand(body) {
+  const match = String(body || "")
+    .trim()
+    .match(/^\s*\/new_password\s+(.+)$/i);
+  return match ? match[1].trim() : null;
+}
+
+function isResetPasswordTrigger(body) {
+  const value = String(body || "").trim();
+  return /^\s*(\/reset_password|reset password)\b/i.test(value);
+}
+
+function isCancelResetPassword(body) {
+  return /^\s*(\/cancel_reset|cancel reset)\b/i.test(String(body || "").trim());
+}
 const { fetchWebpage, openBrowser } = require("../utils/browser");
 const OS_NAME_MAP = { win32: "Windows", darwin: "macOS", linux: "Linux" };
 const hostPlatform = process.platform || "unknown";
@@ -1711,6 +1748,76 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
     userId,
     assistantInput.mediaFileId,
   );
+
+  const incomingText = String(assistantInput.body || "").trim();
+  const pendingReset = getPendingPasswordReset(userId, chatId);
+  const newPassword = parseNewPasswordCommand(incomingText);
+
+  if (isCancelResetPassword(incomingText) && pendingReset) {
+    clearPendingPasswordReset(userId, chatId);
+    await sendAssistantMessage(
+      userId,
+      "openwa:assistant",
+      "OpenWA Assistant",
+      "Password reset cancelled. If you want to reset again, send /reset_password.",
+      io,
+      chatId,
+    );
+    return;
+  }
+
+  if (pendingReset && newPassword) {
+    try {
+      await authService.resetPasswordById({
+        userId,
+        password: newPassword,
+      });
+      clearPendingPasswordReset(userId, chatId);
+      await sendAssistantMessage(
+        userId,
+        "openwa:assistant",
+        "OpenWA Assistant",
+        "✅ Your password has been reset successfully.",
+        io,
+        chatId,
+      );
+    } catch (error) {
+      await sendAssistantMessage(
+        userId,
+        "openwa:assistant",
+        "OpenWA Assistant",
+        `Failed to reset password: ${error.message}`,
+        io,
+        chatId,
+      );
+    }
+    return;
+  }
+
+  if (pendingReset) {
+    await sendAssistantMessage(
+      userId,
+      "openwa:assistant",
+      "OpenWA Assistant",
+      "I am waiting for your new password. Please reply with /new_password <your-new-password> or /cancel_reset.",
+      io,
+      chatId,
+    );
+    return;
+  }
+
+  if (isResetPasswordTrigger(incomingText)) {
+    setPendingPasswordReset(userId, chatId);
+    await sendAssistantMessage(
+      userId,
+      "openwa:assistant",
+      "OpenWA Assistant",
+      "To reset your password, please reply with /new_password <your-new-password>. This will reset the password for the current OpenWA user account.",
+      io,
+      chatId,
+    );
+    return;
+  }
   const llmUserMessage = buildMessageContentForLLM({
     body: assistantInput.body,
     mediaFile,

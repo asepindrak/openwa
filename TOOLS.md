@@ -14,6 +14,8 @@ Default skills
 - `update_tools_md` — Append or update human-readable entries in this file when new external tools are registered.
 - `setup_telegram_bot` — Set up a Telegram bot with a BotFather token so OpenWA can be remotely controlled via Telegram.
 - `configure_telegram_admins` — Save authorized Telegram chat IDs to restrict which Telegram users may control OpenWA.
+- `reset_password` — Initiate a password reset flow for the current OpenWA user via agent or Telegram chat. The assistant will ask for a new password and then reset it only for the user owning the bot/chat.
+- `cancel_reset` — Cancel an in-progress password reset flow.
 - `get_telegram_bot_status` — Check whether the Telegram bot is currently configured and running.
 - `get_webpage` — Fetch and read the content of a URL (static or dynamic).
 - `open_browser` — Open a browser to read a URL, useful for JavaScript-heavy sites.
@@ -64,6 +66,26 @@ Detailed examples for commonly-used tools
 
   ```json
   {}
+  ```
+
+- `reset_password` (reset_password)
+
+  Description: initiates a password reset flow for the current OpenWA user via agent or Telegram. The assistant should confirm the request and prompt the user to send the new password using `/new_password <password>`.
+
+  Example usage in chat:
+
+  ```text
+  /reset_password
+  ```
+
+- `cancel_reset` (cancel_reset)
+
+  Description: cancels an active password reset flow if the user changes their mind.
+
+  Example usage in chat:
+
+  ```text
+  /cancel_reset
   ```
 
 - `open_browser` (open_browser)

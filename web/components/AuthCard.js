@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { apiFetch } from "@/lib/api";
 import { BrandLogo } from "@/components/BrandLogo";
 
 const initialValues = {
@@ -22,6 +23,12 @@ export function AuthCard({
   registerAllowed = true,
 }) {
   const [values, setValues] = useState(initialValues);
+  const [forgotPassword, setForgotPassword] = useState(false);
+  const [resetSecret, setResetSecret] = useState("");
+  const [resetVerified, setResetVerified] = useState(false);
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState("");
   const title = useMemo(
     () =>
       mode === "login" ? "Sign in to OpenWA" : "Create your OpenWA workspace",
@@ -39,6 +46,61 @@ export function AuthCard({
     event.preventDefault();
     await onSubmit(values);
     setValues((current) => ({ ...current, password: "" }));
+  };
+
+  const handleVerifyResetPassword = async (event) => {
+    event.preventDefault();
+    setResetMessage("");
+    setVerifyLoading(true);
+
+    try {
+      if (!values.email || !resetSecret) {
+        throw new Error("Email and OpenWA secret are required.");
+      }
+      await apiFetch("/api/auth/reset-password-request", {
+        method: "POST",
+        body: {
+          email: values.email,
+          secret: resetSecret,
+        },
+      });
+      setResetVerified(true);
+      setResetMessage("Secret verified. Enter a new password below.");
+    } catch (error) {
+      setResetVerified(false);
+      setResetMessage(error.message);
+    } finally {
+      setVerifyLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (event) => {
+    event.preventDefault();
+    setResetMessage("");
+    setResetLoading(true);
+
+    try {
+      if (!values.email || !resetSecret || !values.password) {
+        throw new Error("Email, OpenWA secret, and new password are required.");
+      }
+      await apiFetch("/api/auth/reset-password", {
+        method: "POST",
+        body: {
+          email: values.email,
+          secret: resetSecret,
+          password: values.password,
+        },
+      });
+      setResetMessage("Password reset successfully. You can now log in.");
+      setForgotPassword(false);
+      setResetVerified(false);
+      setResetSecret("");
+      setValues((current) => ({ ...current, password: "" }));
+    } catch (error) {
+      setResetMessage(error.message);
+    } finally {
+      setResetLoading(false);
+    }
   };
 
   return (
@@ -254,6 +316,119 @@ export function AuthCard({
                   : "Create account and get started"}
             </button>
           </form>
+
+          {mode === "login" ? (
+            <div className="mt-4 flex items-center justify-between text-sm text-[#667781]">
+              <button
+                type="button"
+                className="font-medium text-[#00a884] hover:text-[#01886d]"
+                onClick={() => {
+                  setForgotPassword((current) => !current);
+                  setResetVerified(false);
+                  setResetMessage("");
+                }}
+              >
+                {forgotPassword ? "Cancel password reset" : "Forgot password?"}
+              </button>
+            </div>
+          ) : null}
+
+          {mode === "login" && forgotPassword ? (
+            <div className="mt-6 rounded-[24px] border border-[#d1d7db] bg-[#f7f8fa] p-4">
+              <h3 className="mb-3 text-base font-semibold text-[#111b21]">
+                Reset password with OpenWA secret
+              </h3>
+              <p className="mb-4 text-sm leading-6 text-[#667781]">
+                Enter your account email and the OpenWA secret from your
+                deployment environment to enable password reset.
+              </p>
+
+              <form
+                onSubmit={
+                  resetVerified
+                    ? handleResetPassword
+                    : handleVerifyResetPassword
+                }
+                className="space-y-4"
+              >
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-[#54656f]">
+                    Email
+                  </span>
+                  <input
+                    type="email"
+                    className="w-full rounded-2xl border border-[#d1d7db] bg-[#f7f8fa] px-4 py-3.5 text-[#111b21] outline-none transition placeholder:text-[#8696a0] focus:border-[#00a884] focus:bg-white"
+                    value={values.email}
+                    onChange={(event) =>
+                      setValues((current) => ({
+                        ...current,
+                        email: event.target.value,
+                      }))
+                    }
+                    placeholder="you@example.com"
+                    required
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="mb-2 block text-sm font-medium text-[#54656f]">
+                    OpenWA secret
+                  </span>
+                  <input
+                    type="password"
+                    className="w-full rounded-2xl border border-[#d1d7db] bg-[#f7f8fa] px-4 py-3.5 text-[#111b21] outline-none transition placeholder:text-[#8696a0] focus:border-[#00a884] focus:bg-white"
+                    value={resetSecret}
+                    onChange={(event) => setResetSecret(event.target.value)}
+                    placeholder="Deployment secret"
+                    required
+                  />
+                </label>
+
+                {resetVerified ? (
+                  <label className="block">
+                    <span className="mb-2 block text-sm font-medium text-[#54656f]">
+                      New password
+                    </span>
+                    <input
+                      type="password"
+                      className="w-full rounded-2xl border border-[#d1d7db] bg-[#f7f8fa] px-4 py-3.5 text-[#111b21] outline-none transition placeholder:text-[#8696a0] focus:border-[#00a884] focus:bg-white"
+                      value={values.password}
+                      onChange={(event) =>
+                        setValues((current) => ({
+                          ...current,
+                          password: event.target.value,
+                        }))
+                      }
+                      placeholder="New password"
+                      required
+                    />
+                  </label>
+                ) : null}
+
+                {resetMessage ? (
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm ${resetVerified ? "bg-emerald-50 text-emerald-800 border border-emerald-200" : "bg-red-50 text-red-800 border border-red-200"}`}
+                  >
+                    {resetMessage}
+                  </div>
+                ) : null}
+
+                <button
+                  type="submit"
+                  className="w-full rounded-2xl bg-[#00a884] px-4 py-3.5 font-semibold text-white transition hover:bg-[#019273] disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={verifyLoading || resetLoading}
+                >
+                  {resetVerified
+                    ? resetLoading
+                      ? "Resetting..."
+                      : "Reset password"
+                    : verifyLoading
+                      ? "Verifying..."
+                      : "Verify secret"}
+                </button>
+              </form>
+            </div>
+          ) : null}
 
           <div className="mt-8 rounded-[24px] bg-[#f7f8fa] px-4 py-4">
             <p className="text-xs uppercase tracking-[0.22em] text-[#8696a0]">

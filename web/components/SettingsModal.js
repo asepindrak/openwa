@@ -175,6 +175,9 @@ export function SettingsModal({
   const [modelsMap, setModelsMap] = useState({});
   const [registerAllowed, setRegisterAllowed] = useState(true);
   const [registerLoading, setRegisterLoading] = useState(false);
+  const [resetPasswordValue, setResetPasswordValue] = useState("");
+  const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
+  const [resetAllLoading, setResetAllLoading] = useState(false);
   const [modelsLoadingId, setModelsLoadingId] = useState(null);
   const [manualModelByProvider, setManualModelByProvider] = useState({});
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -278,6 +281,54 @@ export function SettingsModal({
       alert(err.message || "Failed to create provider");
     } finally {
       setAddingProvider(false);
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    if (!token) return;
+    if (!resetPasswordValue) {
+      alert("New password is required.");
+      return;
+    }
+
+    setResetPasswordLoading(true);
+    try {
+      await apiFetch("/api/settings/reset-password", {
+        method: "POST",
+        token,
+        body: {
+          password: resetPasswordValue,
+        },
+      });
+      alert("Password reset successfully.");
+      setResetPasswordValue("");
+    } catch (err) {
+      alert(err.message || "Failed to reset password");
+    } finally {
+      setResetPasswordLoading(false);
+    }
+  };
+
+  const handleResetAllData = async () => {
+    if (!token) return;
+    const confirmed = window.prompt(
+      "Type YES to confirm resetting all OpenWA data. This action is permanent.",
+    );
+    if (confirmed !== "YES") return;
+
+    setResetAllLoading(true);
+    try {
+      await apiFetch("/api/settings/reset-all", {
+        method: "POST",
+        token,
+        body: { confirm: "YES" },
+      });
+      alert("All data has been reset. Please restart OpenWA and log in again.");
+    } catch (err) {
+      alert(err.message || "Failed to reset all data");
+    } finally {
+      setResetAllLoading(false);
     }
   };
 
@@ -1160,6 +1211,63 @@ export function SettingsModal({
                       }}
                     >
                       {terminalAutoApproveAll ? "Enabled" : "Disabled"}
+                    </button>
+                  </div>
+
+                  <div className="mt-8 rounded-[22px] bg-[#2e2f2f] p-4 ring-1 ring-white/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-white">
+                          Reset user password
+                        </p>
+                        <p className="mt-1 text-xs text-white/45">
+                          Set a new password for an existing user account.
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/70">
+                        Admin only
+                      </span>
+                    </div>
+
+                    <form
+                      className="mt-4 space-y-3"
+                      onSubmit={handleResetPassword}
+                    >
+                      <input
+                        className="w-full rounded-[22px] bg-[#161717] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30"
+                        placeholder="New password"
+                        type="password"
+                        value={resetPasswordValue}
+                        onChange={(e) => setResetPasswordValue(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="submit"
+                        className="w-full rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a] disabled:opacity-60"
+                        disabled={resetPasswordLoading}
+                      >
+                        {resetPasswordLoading
+                          ? "Resetting..."
+                          : "Reset password"}
+                      </button>
+                    </form>
+                  </div>
+
+                  <div className="mt-6 rounded-[22px] bg-[#2e2f2f] p-4 ring-1 ring-white/10">
+                    <p className="text-sm font-semibold text-white">
+                      Reset all OpenWA data
+                    </p>
+                    <p className="mt-1 text-xs text-white/45">
+                      Permanently deletes all stored app data. Requires
+                      confirmation.
+                    </p>
+                    <button
+                      type="button"
+                      className="mt-4 w-full rounded-2xl bg-red-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
+                      onClick={handleResetAllData}
+                      disabled={resetAllLoading}
+                    >
+                      {resetAllLoading ? "Resetting..." : "Reset all data"}
                     </button>
                   </div>
                 </div>
