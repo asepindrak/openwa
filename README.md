@@ -351,8 +351,11 @@ Returns the initial workspace payload, including the current user, sessions, cha
 
 - `GET /api/chats/{chatId}/messages`
 - `POST /api/chats/{chatId}/messages/send`
+- `POST /api/messages/send`
 - `DELETE /api/messages/{messageId}`
 - `POST /api/messages/{messageId}/forward`
+
+> Note: `sessionId` is required for all `send` requests (`/api/chats/{chatId}/messages/send` and `/api/messages/send`).
 
 `GET /api/chats/{chatId}/messages` supports:
 
@@ -424,13 +427,22 @@ Read messages for a chat:
 curl -H "X-API-Key: <api-key>" http://localhost:55111/api/chats/<chatId>/messages
 ```
 
-Send a text message:
+Send a text message to an existing chat:
 
 ```bash
 curl -X POST http://localhost:55111/api/chats/<chatId>/messages/send \
   -H "Content-Type: application/json" \
   -H "X-API-Key: <api-key>" \
-  -d "{\"body\":\"Hello from OpenWA\",\"type\":\"text\"}"
+  -d '{"sessionId":"<sessionId>","body":"Hello from OpenWA","type":"text"}'
+```
+
+Send a direct message by phone number:
+
+```bash
+curl -X POST http://localhost:55111/api/messages/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <api-key>" \
+  -d '{"sessionId":"<sessionId>","phoneNumber":"+6281234567890","body":"Hello from OpenWA","type":"text"}'
 ```
 
 Upload media:

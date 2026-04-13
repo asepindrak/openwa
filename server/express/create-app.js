@@ -1097,6 +1097,10 @@ function createApp({ config, sessionManager }) {
         throw new Error("chatId or phoneNumber is required.");
       }
 
+      if (!requestedSessionId) {
+        throw new Error("sessionId is required.");
+      }
+
       if (type === "text") {
         if (mediaUrl) {
           throw new Error("mediaUrl is only allowed for media message types.");
@@ -1149,6 +1153,12 @@ function createApp({ config, sessionManager }) {
         );
         if (!existingChat) {
           throw new Error("Chat not found.");
+        }
+        if (
+          existingChat.sessionId &&
+          existingChat.sessionId !== requestedSessionId
+        ) {
+          throw new Error("sessionId does not match the chat's sessionId.");
         }
         targetChat = existingChat;
       } else {

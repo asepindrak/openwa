@@ -796,10 +796,15 @@ function createOpenApiDocument(config) {
               "application/json": {
                 schema: {
                   type: "object",
+                  required: ["sessionId"],
                   properties: {
                     chatId: { type: "string" },
                     phoneNumber: { type: "string" },
-                    sessionId: { type: "string" },
+                    sessionId: {
+                      type: "string",
+                      description:
+                        "Required WhatsApp sessionId used to choose which connected device sends the message.",
+                    },
                     displayName: { type: "string" },
                     body: { type: "string" },
                     type: {
@@ -823,6 +828,7 @@ function createOpenApiDocument(config) {
                     summary: "Send a text message by phone number",
                     value: {
                       phoneNumber: "+6281234567890",
+                      sessionId: "session-id-abc123",
                       body: "Halo, ini follow up customer",
                       type: "text",
                     },
@@ -831,6 +837,7 @@ function createOpenApiDocument(config) {
                     summary: "Send a media message by URL",
                     value: {
                       phoneNumber: "+6281234567890",
+                      sessionId: "session-id-abc123",
                       mediaUrl: "https://example.com/image.jpg",
                       type: "image",
                     },
@@ -933,85 +940,6 @@ function createOpenApiDocument(config) {
   };
 }
 
-function createAgentReadme(config) {
-  return `# OpenWA Agent Guide
-
-Recommended base URL for agents:
-
-- ${config.frontendUrl}
-
-Use the frontend URL because docs and runtime metadata endpoints are already proxied to the backend.
-
-## Authentication
-
-Use either of these headers:
-
-\`\`\`
-X-API-Key: <api-key>
-\`\`\`
-
-or
-
-\`\`\`
-Authorization: Bearer <api-key>
-\`\`\`
-
-Agents do **not** need to log in through dashboard auth endpoints as long as they already have an API key.
-
-## Quick start
-
-1. Check runtime availability:
-   - \`GET /health\`
-   - \`GET /version\`
-2. Fetch the machine-readable specification:
-   - \`GET /docs/json\`
-3. Read chats and contacts:
-   - \`GET /api/chats\`
-   - \`GET /api/contacts\`
-4. Open or create a chat from a contact:
-   - \`POST /api/contacts/:contactId/open\`
-5. Read or search messages:
-   - \`GET /api/chats/:chatId/messages\`
-   - \`GET /api/chats/:chatId/messages?search=keyword\`
-6. Send a message:
-  - \`POST /api/chats/:chatId/messages/send\`
-  - \`POST /api/messages/send\` — send directly by \`phoneNumber\`, including \`mediaUrl\` or \`mediaFileId\` for media messages
-### Example payloads
-
-Text message:
-\`\`\`json
-{
-  "phoneNumber": "+6281234567890",
-  "body": "Halo, ini follow up customer",
-  "type": "text"
-}
-\`\`\`
-
-Media message by URL:
-\`\`\`json
-{
-  "phoneNumber": "+6281234567890",
-  "mediaUrl": "https://example.com/image.jpg",
-  "type": "image"
-}
-\`\`\`
-
-7. Configure webhooks (optional)
-  - \`GET /api/webhook\` — read current webhook configuration
-  - \`POST /api/webhook\` — set webhook { "url": "https://...", "apiKey": "..." }
-  - \`DELETE /api/webhook\` — remove the webhook
-
-When an incoming message arrives the runtime will \`POST\` a JSON payload to your configured URL with header \`x-openwa-webhook-key\` set to the \`apiKey\` you provided. The payload contains \`chat\` and \`message\` objects described in the OpenAPI schemas.
-
-## Important notes
-
-- \`/api/auth/register\` and \`/api/auth/login\` are meant for dashboard or human login flows, not the normal agent flow.
-- API keys are created from the OpenWA dashboard under **Settings → API Access**.
-- For media messages, upload the file to \`POST /api/media\` first, then send the returned \`mediaFileId\` through the HTTP send message endpoint.
-- Main business endpoints accept JWT **or** API key authentication, but API key management endpoints only accept dashboard JWT authentication.
-`;
-}
-
 function createSwaggerHtml() {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1055,7 +983,18 @@ function createSwaggerHtml() {
 
 function createAgentReadme(config, apiKeySecret) {
   const keyBlock = apiKeySecret
-    ? `\n\n## API Key (auto-generated)\n\nUse this API key for agent requests:\n\n\`X-API-Key: ${apiKeySecret}\`\n\nor\n\n\`Authorization: Bearer ${apiKeySecret}\`\n`
+    ? `
+
+## API Key (auto-generated)
+
+Use this API key for agent requests:
+
+\`X-API-Key: ${apiKeySecret}\`
+
+or
+
+\`Authorization: Bearer ${apiKeySecret}\`
+`
     : "";
 
   return `# OpenWA Agent Guide
@@ -1091,22 +1030,41 @@ ${keyBlock}
   - \`GET /version\`
 2. Fetch the machine-readable specification:
   - \`GET /docs/json\`
-3. Read chats and contacts:
+3. List and manage WhatsApp sessions:
+  - \`GET /api/sessions\`
+  - \`POST /api/sessions\`
+  - \`POST /api/sessions/:sessionId/connect\`
+  - \`POST /api/sessions/:sessionId/disconnect\`
+4. Read chats and contacts:
   - \`GET /api/chats\`
   - \`GET /api/contacts\`
-4. Open or create a chat from a contact:
+5. Open or create a chat from a contact:
   - \`POST /api/contacts/:contactId/open\`
-5. Read or search messages:
+6. Read or search messages:
   - \`GET /api/chats/:chatId/messages\`
   - \`GET /api/chats/:chatId/messages?search=keyword\`
-6. Send a message:
+7. Send a message:
   - \`POST /api/chats/:chatId/messages/send\`
   - \`POST /api/messages/send\` — send directly by \`phoneNumber\`, including \`mediaUrl\` or \`mediaFileId\` for media messages
+
+> \`sessionId\` is required for all send requests.
+
 ### Example payloads
 
-Text message:
+Send a text message to an existing chat:
 \`\`\`json
 {
+  "sessionId": "<sessionId>",
+  "chatId": "<chatId>",
+  "body": "Halo, ini follow up customer",
+  "type": "text"
+}
+\`\`\`
+
+Send a direct message by phone number:
+\`\`\`json
+{
+  "sessionId": "<sessionId>",
   "phoneNumber": "+6281234567890",
   "body": "Halo, ini follow up customer",
   "type": "text"
@@ -1116,13 +1074,14 @@ Text message:
 Media message by URL:
 \`\`\`json
 {
+  "sessionId": "<sessionId>",
   "phoneNumber": "+6281234567890",
   "mediaUrl": "https://example.com/image.jpg",
   "type": "image"
 }
 \`\`\`
 
-7. Configure webhooks (optional)
+8. Configure webhooks (optional)
   - \`GET /api/webhook\` — read current webhook configuration
   - \`POST /api/webhook\` — set webhook { "url": "https://...", "apiKey": "..." }
   - \`DELETE /api/webhook\` — remove the webhook
@@ -1137,7 +1096,6 @@ When an incoming message arrives the runtime will \`POST\` a JSON payload to you
  - Main business endpoints accept JWT **or** API key authentication, but API key management endpoints only accept dashboard JWT authentication.
 `;
 }
-
 module.exports = {
   createOpenApiDocument,
   createAgentReadme,
