@@ -783,6 +783,69 @@ function createOpenApiDocument(config) {
           },
         },
       },
+      "/api/messages/send": {
+        post: {
+          tags: ["Messages"],
+          summary: "Send a message directly to a WhatsApp number or chat",
+          description:
+            "Send a WhatsApp message using either an existing chatId or a direct phoneNumber. If the chat does not exist yet, the runtime will open a chat for the given WhatsApp number.",
+          security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    chatId: { type: "string" },
+                    phoneNumber: { type: "string" },
+                    sessionId: { type: "string" },
+                    displayName: { type: "string" },
+                    body: { type: "string" },
+                    type: {
+                      type: "string",
+                      enum: [
+                        "text",
+                        "image",
+                        "video",
+                        "audio",
+                        "document",
+                        "sticker",
+                      ],
+                    },
+                    mediaFileId: { type: "string" },
+                    mediaUrl: { type: "string", format: "uri" },
+                    replyToId: { type: "string" },
+                  },
+                },
+                examples: {
+                  directTextMessage: {
+                    summary: "Send a text message by phone number",
+                    value: {
+                      phoneNumber: "+6281234567890",
+                      body: "Halo, ini follow up customer",
+                      type: "text",
+                    },
+                  },
+                  directMediaMessage: {
+                    summary: "Send a media message by URL",
+                    value: {
+                      phoneNumber: "+6281234567890",
+                      mediaUrl: "https://example.com/image.jpg",
+                      type: "image",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Sent message payload",
+            },
+          },
+        },
+      },
       "/api/messages/{messageId}": {
         delete: {
           tags: ["Messages"],
@@ -912,6 +975,26 @@ Agents do **not** need to log in through dashboard auth endpoints as long as the
    - \`GET /api/chats/:chatId/messages?search=keyword\`
 6. Send a message:
   - \`POST /api/chats/:chatId/messages/send\`
+  - \`POST /api/messages/send\` — send directly by \`phoneNumber\`, including \`mediaUrl\` or \`mediaFileId\` for media messages
+### Example payloads
+
+Text message:
+\`\`\`json
+{
+  "phoneNumber": "+6281234567890",
+  "body": "Halo, ini follow up customer",
+  "type": "text"
+}
+\`\`\`
+
+Media message by URL:
+\`\`\`json
+{
+  "phoneNumber": "+6281234567890",
+  "mediaUrl": "https://example.com/image.jpg",
+  "type": "image"
+}
+\`\`\`
 
 7. Configure webhooks (optional)
   - \`GET /api/webhook\` — read current webhook configuration
@@ -1018,6 +1101,26 @@ ${keyBlock}
   - \`GET /api/chats/:chatId/messages?search=keyword\`
 6. Send a message:
   - \`POST /api/chats/:chatId/messages/send\`
+  - \`POST /api/messages/send\` — send directly by \`phoneNumber\`, including \`mediaUrl\` or \`mediaFileId\` for media messages
+### Example payloads
+
+Text message:
+\`\`\`json
+{
+  "phoneNumber": "+6281234567890",
+  "body": "Halo, ini follow up customer",
+  "type": "text"
+}
+\`\`\`
+
+Media message by URL:
+\`\`\`json
+{
+  "phoneNumber": "+6281234567890",
+  "mediaUrl": "https://example.com/image.jpg",
+  "type": "image"
+}
+\`\`\`
 
 7. Configure webhooks (optional)
   - \`GET /api/webhook\` — read current webhook configuration

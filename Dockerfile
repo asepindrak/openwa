@@ -4,8 +4,12 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Install dependencies before copying source for better caching
+RUN apt-get update && apt-get install -y openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies before copying most source files for better caching
 COPY package*.json ./
+COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npm ci
 
 # Copy application sources and build
@@ -16,7 +20,11 @@ RUN npm run build
 FROM node:20-slim AS runner
 WORKDIR /app
 
+RUN apt-get update && apt-get install -y openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY package*.json ./
+COPY prisma/schema.prisma ./prisma/schema.prisma
 RUN npm ci --omit=dev
 
 # Copy build output and runtime app files

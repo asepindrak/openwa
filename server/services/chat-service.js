@@ -914,6 +914,64 @@ async function listContacts(userId, sessionId, search) {
   }));
 }
 
+async function normalizeWhatsappExternalId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    throw new Error("phoneNumber is required.");
+  }
+
+  if (raw.endsWith("@c.us") || raw.endsWith("@g.us")) {
+    return raw;
+  }
+
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) {
+    throw new Error("phoneNumber must contain digits.");
+  }
+
+  return `${digits}@c.us`;
+}
+
+async function findContactByExternalId(userId, externalId) {
+  return retryOnSqliteTimeout(() =>
+    prisma.contact.findUnique({
+      where: {
+        userId_externalId: {
+          userId,
+          externalId,
+        },
+      },
+    }),
+  );
+}
+
+async function ensureChatForWhatsappId({
+  userId,
+  externalId,
+  sessionId,
+  displayName,
+}) {
+  let contact = await findContactByExternalId(userId, externalId);
+
+  if (!contact) {
+    contact = await ensureWhatsappContact({
+      userId,
+      sessionId,
+      externalId,
+      displayName,
+    });
+  } else if (sessionId && contact.sessionId !== sessionId) {
+    contact = await retryOnSqliteTimeout(() =>
+      prisma.contact.update({
+        where: { id: contact.id },
+        data: { sessionId },
+      }),
+    );
+  }
+
+  return openChatForContact(userId, contact.id);
+}
+
 async function openChatForContact(userId, contactId) {
   const chat = await ensureChatForContact(userId, contactId);
   return loadChatSummary(chat.id);
@@ -1350,6 +1408,9 @@ module.exports = {
   listChats,
   listMessages,
   markChatOpened,
+  normalizeWhatsappExternalId,
+  findContactByExternalId,
+  ensureChatForWhatsappId,
   openChatForContact,
   syncWhatsappSnapshot,
   storeIncomingMessage,

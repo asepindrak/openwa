@@ -1,6 +1,7 @@
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 const crypto = require("crypto");
 const {
   authMiddleware,
@@ -63,6 +64,64 @@ function createUploader() {
   });
 
   return multer({ storage });
+}
+
+function getFilenameFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const basename = path.basename(parsed.pathname);
+    return basename || "download";
+  } catch (error) {
+    return "download";
+  }
+}
+
+function getExtensionFromMimeType(mimeType) {
+  if (!mimeType) return "";
+  const normalized = mimeType.split(";")[0].trim().toLowerCase();
+  if (normalized === "image/jpeg" || normalized === "image/jpg") return ".jpg";
+  if (normalized === "image/png") return ".png";
+  if (normalized === "image/webp") return ".webp";
+  if (normalized === "image/gif") return ".gif";
+  if (normalized === "video/mp4") return ".mp4";
+  if (normalized === "video/quicktime") return ".mov";
+  if (normalized === "audio/mpeg") return ".mp3";
+  if (normalized === "audio/ogg") return ".ogg";
+  if (normalized === "audio/wav") return ".wav";
+  if (normalized === "application/pdf") return ".pdf";
+  if (normalized === "application/zip") return ".zip";
+  return "";
+}
+
+async function downloadMediaUrl(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(
+      `Failed to download media from URL: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const contentType =
+    response.headers.get("content-type") || "application/octet-stream";
+  const originalname = getFilenameFromUrl(url);
+  let ext = path.extname(originalname);
+  if (!ext) {
+    ext = getExtensionFromMimeType(contentType) || ".bin";
+  }
+
+  const filename = `${crypto.randomUUID()}${ext}`;
+  const filePath = path.join(mediaDir, filename);
+  const buffer = Buffer.from(await response.arrayBuffer());
+
+  fs.writeFileSync(filePath, buffer);
+
+  return {
+    path: filePath,
+    filename,
+    originalname,
+    mimetype: contentType.split(";")[0].trim(),
+    size: buffer.length,
+  };
 }
 
 function withAsync(handler, statusCode = 500) {
@@ -1010,6 +1069,138 @@ function createApp({ config, sessionManager }) {
         req.params.contactId,
       );
       res.json({ chat });
+    } catch (error) {
+      res.status(error?.code === "P1008" ? 503 : 400).json({
+        error:
+          error?.code === "P1008"
+            ? "Database is busy. Please try again."
+            : error.message,
+      });
+    }
+  });
+
+  app.post("/api/messages/send", requireAuth, async (req, res) => {
+    try {
+      const {
+        chatId,
+        phoneNumber,
+        sessionId: requestedSessionId,
+        body,
+        type = "text",
+        mediaFileId = null,
+        mediaUrl = null,
+        replyToId = null,
+        displayName,
+      } = req.body || {};
+
+      if (!chatId && !phoneNumber) {
+        throw new Error("chatId or phoneNumber is required.");
+      }
+
+      if (type === "text") {
+        if (mediaUrl) {
+          throw new Error("mediaUrl is only allowed for media message types.");
+        }
+        if (mediaFileId) {
+          throw new Error(
+            "mediaFileId is only allowed for media message types.",
+          );
+        }
+        if (!body) {
+          throw new Error("body is required for text messages.");
+        }
+      }
+
+      const mediaTypes = ["image", "video", "audio", "document", "sticker"];
+      const isMediaType = mediaTypes.includes(type);
+      if (isMediaType && !mediaFileId && !mediaUrl) {
+        throw new Error(
+          "mediaFileId or mediaUrl is required for media messages.",
+        );
+      }
+
+      if (mediaUrl && typeof mediaUrl === "string") {
+        try {
+          new URL(mediaUrl);
+        } catch (error) {
+          throw new Error("mediaUrl must be a valid URL.");
+        }
+      }
+
+      let targetChat;
+      let chosenSessionId = requestedSessionId;
+      let effectiveType = type;
+      let effectiveMediaFileId = mediaFileId;
+
+      if (mediaUrl && !effectiveMediaFileId) {
+        const downloadedFile = await downloadMediaUrl(mediaUrl);
+        const uploadedMedia = await chatService.createMediaFile(
+          req.user.id,
+          downloadedFile,
+        );
+        effectiveMediaFileId = uploadedMedia.id;
+        effectiveType = inferMessageType(downloadedFile);
+      }
+
+      if (chatId) {
+        const existingChat = await chatService.getChatWithContact(
+          req.user.id,
+          chatId,
+        );
+        if (!existingChat) {
+          throw new Error("Chat not found.");
+        }
+        targetChat = existingChat;
+      } else {
+        const externalId =
+          await chatService.normalizeWhatsappExternalId(phoneNumber);
+
+        if (!chosenSessionId) {
+          const sessions = await sessionService.listUserSessions(req.user.id);
+          const readySession = sessions.find(
+            (session) => session.status === "ready",
+          );
+          if (!readySession) {
+            throw new Error(
+              "No connected WhatsApp session available. Connect a session first or specify sessionId.",
+            );
+          }
+          chosenSessionId = readySession.id;
+        }
+
+        targetChat = await chatService.ensureChatForWhatsappId({
+          userId: req.user.id,
+          externalId,
+          sessionId: chosenSessionId,
+          displayName: displayName || phoneNumber,
+        });
+      }
+
+      const result = await chatService.createOutgoingMessage({
+        userId: req.user.id,
+        chatId: targetChat.id,
+        body,
+        type: effectiveType,
+        mediaFileId: effectiveMediaFileId,
+        replyToId,
+      });
+
+      if (result.message.sessionId) {
+        await sessionManager.sendMessage(result.message.sessionId, {
+          recipient: result.message.receiver,
+          body: result.message.body,
+          mediaFileId: result.message.mediaFileId,
+          mediaPath: result.message.mediaFile?.relativePath || null,
+        });
+
+        await chatService.addMessageStatus(result.message.id, "delivered");
+        result.message.statuses = [
+          ...(result.message.statuses || []),
+          { status: "delivered", createdAt: new Date().toISOString() },
+        ];
+      }
+
+      res.json(result);
     } catch (error) {
       res.status(error?.code === "P1008" ? 503 : 400).json({
         error:
