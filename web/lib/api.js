@@ -17,6 +17,22 @@ export function getApiBaseUrl() {
     return configuredUrl;
   }
 
+  // If the frontend is served over HTTPS and the configured backend URL is HTTP
+  // on the same host, use the secure current origin to avoid mixed content.
+  if (
+    window.location.protocol === "https:" &&
+    configuredUrl.startsWith("http://")
+  ) {
+    try {
+      const resolvedUrl = new URL(configuredUrl);
+      if (resolvedUrl.hostname === window.location.hostname) {
+        return window.location.origin;
+      }
+    } catch {
+      // Ignore parse errors and continue.
+    }
+  }
+
   try {
     const resolvedUrl = new URL(configuredUrl);
 
