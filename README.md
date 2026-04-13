@@ -120,6 +120,7 @@ OpenWA reads `.env` from the repository root. These are the runtime variables cu
 ```env
 # Server and Frontend
 HOST=127.0.0.1
+# or HOST=0.0.0.0 to bind all network interfaces
 FE_PORT=55111
 BE_PORT=55222
 OPENWA_FRONTEND_URL=http://localhost:55111

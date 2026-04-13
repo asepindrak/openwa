@@ -83,8 +83,9 @@ FE_PORT=55111
 BE_PORT=55222
 
 # URL Configuration
-OPENWA_FRONTEND_URL=http://localhost:55111
-OPENWA_BACKEND_URL=http://localhost:55222
+# When exposing OpenWA over a public IP, set these to your external host
+OPENWA_FRONTEND_URL=http://your-server-ip:55111
+OPENWA_BACKEND_URL=http://your-server-ip:55222
 
 # Security
 OPENWA_JWT_SECRET=your-secret-key-here

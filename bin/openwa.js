@@ -14,7 +14,45 @@ const {
 
 const args = process.argv.slice(2);
 const dev = args.includes("--dev");
-const command = args.find((arg) => arg !== "--dev");
+
+function getOptionValue(optionName) {
+  const exact = args.find((arg) => arg.startsWith(`${optionName}=`));
+  if (exact) {
+    return exact.slice(optionName.length + 1);
+  }
+
+  const index = args.indexOf(optionName);
+  if (index !== -1 && index + 1 < args.length) {
+    return args[index + 1];
+  }
+
+  return null;
+}
+
+const hostArg = getOptionValue("--host");
+if (hostArg) {
+  process.env.HOST = hostArg;
+}
+
+const filteredArgs = [];
+let skipNext = false;
+for (const arg of args) {
+  if (skipNext) {
+    skipNext = false;
+    continue;
+  }
+
+  if (arg === "--dev" || arg === "--host" || arg.startsWith("--host=")) {
+    if (arg === "--host") {
+      skipNext = true;
+    }
+    continue;
+  }
+
+  filteredArgs.push(arg);
+}
+
+const command = filteredArgs[0];
 
 async function askQuestion(prompt, { mask = false } = {}) {
   return new Promise((resolve) => {

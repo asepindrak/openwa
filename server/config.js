@@ -6,10 +6,25 @@ dotenv.config({ path: path.join(rootDir, ".env") });
 
 function getConfig({ dev = false } = {}) {
   const host = process.env.HOST || "127.0.0.1";
-  const frontendPort = Number(process.env.FE_PORT || process.env.FRONTEND_PORT || 55111);
-  const backendPort = Number(process.env.BE_PORT || process.env.BACKEND_PORT || 55222);
-  const frontendUrl = process.env.OPENWA_FRONTEND_URL || `http://localhost:${frontendPort}`;
-  const backendUrl = process.env.OPENWA_BACKEND_URL || `http://localhost:${backendPort}`;
+  const frontendPort = Number(
+    process.env.FE_PORT || process.env.FRONTEND_PORT || 55111,
+  );
+  const backendPort = Number(
+    process.env.BE_PORT || process.env.BACKEND_PORT || 55222,
+  );
+  const publicHost = [
+    "0.0.0.0",
+    "127.0.0.1",
+    "localhost",
+    "::1",
+    "[::1]",
+  ].includes(host)
+    ? "localhost"
+    : host;
+  const frontendUrl =
+    process.env.OPENWA_FRONTEND_URL || `http://${publicHost}:${frontendPort}`;
+  const backendUrl =
+    process.env.OPENWA_BACKEND_URL || `http://${publicHost}:${backendPort}`;
 
   return {
     dev,
@@ -22,7 +37,7 @@ function getConfig({ dev = false } = {}) {
     jwtSecret: process.env.OPENWA_JWT_SECRET || "openwa-local-dev-secret",
     autoOpenBrowser: process.env.OPENWA_AUTO_OPEN !== "false",
     useWwebjs: process.env.OPENWA_USE_WWEBJS !== "false",
-    allowMockAdapter: process.env.OPENWA_ALLOW_MOCK === "true"
+    allowMockAdapter: process.env.OPENWA_ALLOW_MOCK === "true",
   };
 }
 
