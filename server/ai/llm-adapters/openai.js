@@ -125,9 +125,11 @@ module.exports = {
       const body = {
         model,
         messages: params.messages,
-        temperature: params.temperature ?? 0.7,
         max_tokens: params.max_tokens,
       };
+      if (params.temperature !== undefined && params.temperature !== null) {
+        body.temperature = params.temperature;
+      }
 
       const data = await postOpenAiJson(url, apiKey, body);
       const text = extractOpenAiText(data);
@@ -140,9 +142,11 @@ module.exports = {
       const body = {
         model,
         prompt: params.prompt,
-        temperature: params.temperature ?? 0.7,
         max_tokens: params.max_tokens,
       };
+      if (params.temperature !== undefined && params.temperature !== null) {
+        body.temperature = params.temperature;
+      }
 
       const data = await postOpenAiJson(url, apiKey, body);
       const text = extractOpenAiText(data);

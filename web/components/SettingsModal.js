@@ -173,6 +173,7 @@ export function SettingsModal({
   const [providerApiKey, setProviderApiKey] = useState("");
   const [providerHost, setProviderHost] = useState("");
   const [providerModel, setProviderModel] = useState("");
+  const [providerTemperature, setProviderTemperature] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [addingProvider, setAddingProvider] = useState(false);
   const [modelsMap, setModelsMap] = useState({});
@@ -183,6 +184,9 @@ export function SettingsModal({
   const [resetAllLoading, setResetAllLoading] = useState(false);
   const [modelsLoadingId, setModelsLoadingId] = useState(null);
   const [manualModelByProvider, setManualModelByProvider] = useState({});
+  const [providerTempDraftById, setProviderTempDraftById] = useState({});
+  const [modelTempDraftByProvider, setModelTempDraftByProvider] = useState({});
+  const [savingProviderConfigId, setSavingProviderConfigId] = useState(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [creatingAssistant, setCreatingAssistant] = useState(false);
@@ -212,6 +216,15 @@ export function SettingsModal({
       default:
         return "Provide connection details (API key, host, default model).";
     }
+  }
+
+  function normalizeTemperatureInput(value) {
+    if (value === undefined || value === null || value === "") return "";
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return "";
+    if (parsed < 0) return "0";
+    if (parsed > 2) return "2";
+    return String(Math.round(parsed * 10) / 10);
   }
 
   useEffect(() => {
@@ -266,6 +279,8 @@ export function SettingsModal({
       if (providerHost && providerHost.trim()) cfg.host = providerHost.trim();
       if (providerModel && providerModel.trim())
         cfg.model = providerModel.trim();
+      if (providerTemperature !== "")
+        cfg.temperature = Number(providerTemperature);
 
       const result = await apiFetch("/api/ai-providers", {
         method: "POST",
@@ -279,6 +294,7 @@ export function SettingsModal({
       setProviderApiKey("");
       setProviderHost("");
       setProviderModel("");
+      setProviderTemperature("");
       setShowApiKey(false);
     } catch (err) {
       alert(err.message || "Failed to create provider");
@@ -356,6 +372,100 @@ export function SettingsModal({
       alert(err.message || "Failed to fetch models");
     } finally {
       setModelsLoadingId(null);
+    }
+  };
+
+  const handleSaveProviderTemperature = async (provider, valueOverride) => {
+    if (!token || !provider?.id) return;
+    const hasDraft = Object.prototype.hasOwnProperty.call(
+      providerTempDraftById,
+      provider.id,
+    );
+    const draft = normalizeTemperatureInput(
+      valueOverride !== undefined
+        ? valueOverride
+        : hasDraft
+          ? providerTempDraftById[provider.id]
+          : provider.config?.temperature,
+    );
+    const nextConfig = {
+      ...(provider.config && typeof provider.config === "object"
+        ? provider.config
+        : {}),
+    };
+
+    if (draft === "") delete nextConfig.temperature;
+    else nextConfig.temperature = Number(draft);
+
+    setSavingProviderConfigId(provider.id);
+    try {
+      const data = await apiFetch(`/api/ai-providers/${provider.id}`, {
+        method: "PUT",
+        token,
+        body: { config: nextConfig },
+      });
+      setProviders((prev) =>
+        prev.map((item) => (item.id === provider.id ? data.provider : item)),
+      );
+      setProviderTempDraftById((prev) => ({ ...prev, [provider.id]: draft }));
+    } catch (err) {
+      alert(err.message || "Failed to save provider temperature");
+    } finally {
+      setSavingProviderConfigId(null);
+    }
+  };
+
+  const handleSaveModelTemperature = async (provider, modelId, valueOverride) => {
+    if (!token || !provider?.id || !modelId) return;
+    const hasDraft = Object.prototype.hasOwnProperty.call(
+      modelTempDraftByProvider,
+      provider.id,
+    );
+    const draft = normalizeTemperatureInput(
+      valueOverride !== undefined
+        ? valueOverride
+        : hasDraft
+          ? modelTempDraftByProvider[provider.id]
+          : provider.config?.modelTemperatures?.[modelId],
+    );
+    const nextConfig = {
+      ...(provider.config && typeof provider.config === "object"
+        ? provider.config
+        : {}),
+    };
+    const modelTemps =
+      nextConfig.modelTemperatures &&
+      typeof nextConfig.modelTemperatures === "object"
+        ? { ...nextConfig.modelTemperatures }
+        : {};
+
+    if (draft === "") {
+      delete modelTemps[modelId];
+    } else {
+      modelTemps[modelId] = Number(draft);
+    }
+
+    if (Object.keys(modelTemps).length) nextConfig.modelTemperatures = modelTemps;
+    else delete nextConfig.modelTemperatures;
+
+    setSavingProviderConfigId(provider.id);
+    try {
+      const data = await apiFetch(`/api/ai-providers/${provider.id}`, {
+        method: "PUT",
+        token,
+        body: { config: nextConfig },
+      });
+      setProviders((prev) =>
+        prev.map((item) => (item.id === provider.id ? data.provider : item)),
+      );
+      setModelTempDraftByProvider((prev) => ({
+        ...prev,
+        [provider.id]: draft,
+      }));
+    } catch (err) {
+      alert(err.message || "Failed to save model temperature");
+    } finally {
+      setSavingProviderConfigId(null);
     }
   };
 
@@ -947,6 +1057,43 @@ export function SettingsModal({
                         value={providerModel}
                         onChange={(e) => setProviderModel(e.target.value)}
                       />
+                      <div className="rounded-[16px] bg-[#232424] px-4 py-3">
+                        <div className="mb-2 flex items-center justify-between">
+                          <p className="text-xs text-white/70">
+                            Provider temperature
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-white/60">
+                              {providerTemperature === ""
+                                ? "Auto"
+                                : providerTemperature}
+                            </span>
+                            <button
+                              type="button"
+                              className="rounded-full bg-white/5 px-2 py-1 text-[11px] text-white/70"
+                              onClick={() => setProviderTemperature("")}
+                            >
+                              Auto
+                            </button>
+                          </div>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="2"
+                          step="0.1"
+                          value={providerTemperature === "" ? "1" : providerTemperature}
+                          onChange={(e) =>
+                            setProviderTemperature(
+                              normalizeTemperatureInput(e.target.value),
+                            )
+                          }
+                          className="w-full accent-brand-500"
+                        />
+                        <p className="mt-2 text-[11px] text-white/45">
+                          Set kosong untuk mengikuti default model/provider.
+                        </p>
+                      </div>
                       <p className="text-xs text-white/45">
                         {providerHint(providerKey)}
                       </p>
@@ -1016,6 +1163,69 @@ export function SettingsModal({
                           <p>Created: {formatDateTime(p.createdAt)}</p>
                         </div>
 
+                        <div className="mt-3 rounded-[14px] bg-[#0f1111] px-3 py-3">
+                          <div className="mb-2 flex items-center justify-between">
+                            <p className="text-xs text-white/60">
+                              Provider temperature
+                            </p>
+                            <span className="text-xs text-white/60">
+                              {normalizeTemperatureInput(
+                                providerTempDraftById[p.id] !== undefined
+                                  ? providerTempDraftById[p.id]
+                                  : p.config?.temperature,
+                              ) || "Auto"}
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="2"
+                            step="0.1"
+                            value={
+                              normalizeTemperatureInput(
+                                providerTempDraftById[p.id] !== undefined
+                                  ? providerTempDraftById[p.id]
+                                  : p.config?.temperature,
+                              ) || "1"
+                            }
+                            onChange={(e) =>
+                              setProviderTempDraftById((prev) => ({
+                                ...(prev || {}),
+                                [p.id]: normalizeTemperatureInput(
+                                  e.target.value,
+                                ),
+                              }))
+                            }
+                            className="w-full accent-brand-500"
+                          />
+                          <div className="mt-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/80"
+                              onClick={() => handleSaveProviderTemperature(p)}
+                              disabled={savingProviderConfigId === p.id}
+                            >
+                              {savingProviderConfigId === p.id
+                                ? "Saving..."
+                                : "Save provider temp"}
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/70"
+                              onClick={async () => {
+                                setProviderTempDraftById((prev) => ({
+                                  ...(prev || {}),
+                                  [p.id]: "",
+                                }));
+                                await handleSaveProviderTemperature(p, "");
+                              }}
+                              disabled={savingProviderConfigId === p.id}
+                            >
+                              Auto
+                            </button>
+                          </div>
+                        </div>
+
                         {modelsMap[p.id] && modelsMap[p.id].length ? (
                           <div className="mt-3 grid gap-2">
                             <p className="text-xs text-white/45">Models:</p>
@@ -1070,6 +1280,86 @@ export function SettingsModal({
                                 )}
                               </div>
                             </div>
+
+                            {defaultAiProviderId === p.id && defaultAiModel ? (
+                              <div className="mt-2 rounded-[14px] bg-[#0f1111] px-3 py-3">
+                                <div className="mb-2 flex items-center justify-between">
+                                  <p className="text-xs text-white/60">
+                                    Model temperature ({defaultAiModel})
+                                  </p>
+                                  <span className="text-xs text-white/60">
+                                    {normalizeTemperatureInput(
+                                      modelTempDraftByProvider[p.id] !==
+                                        undefined
+                                        ? modelTempDraftByProvider[p.id]
+                                        : p.config?.modelTemperatures?.[
+                                            defaultAiModel
+                                          ],
+                                    ) || "Auto"}
+                                  </span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="2"
+                                  step="0.1"
+                                  value={
+                                    normalizeTemperatureInput(
+                                      modelTempDraftByProvider[p.id] !==
+                                        undefined
+                                        ? modelTempDraftByProvider[p.id]
+                                        : p.config?.modelTemperatures?.[
+                                            defaultAiModel
+                                          ],
+                                    ) || "1"
+                                  }
+                                  onChange={(e) =>
+                                    setModelTempDraftByProvider((prev) => ({
+                                      ...(prev || {}),
+                                      [p.id]: normalizeTemperatureInput(
+                                        e.target.value,
+                                      ),
+                                    }))
+                                  }
+                                  className="w-full accent-brand-500"
+                                />
+                                <div className="mt-2 flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/80"
+                                    onClick={() =>
+                                      handleSaveModelTemperature(
+                                        p,
+                                        defaultAiModel,
+                                      )
+                                    }
+                                    disabled={savingProviderConfigId === p.id}
+                                  >
+                                    {savingProviderConfigId === p.id
+                                      ? "Saving..."
+                                      : "Save model temp"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="rounded-full bg-white/5 px-3 py-1 text-xs text-white/70"
+                                    onClick={async () => {
+                                      setModelTempDraftByProvider((prev) => ({
+                                        ...(prev || {}),
+                                        [p.id]: "",
+                                      }));
+                                      await handleSaveModelTemperature(
+                                        p,
+                                        defaultAiModel,
+                                        "",
+                                      );
+                                    }}
+                                    disabled={savingProviderConfigId === p.id}
+                                  >
+                                    Auto
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
                         <div className="mt-2">

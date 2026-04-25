@@ -1,6 +1,15 @@
 const aiProviderService = require("./ai-provider-service");
 const userSettings = require("./user-settings");
 
+function parseTemperature(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  if (num < 0) return 0;
+  if (num > 2) return 2;
+  return num;
+}
+
 async function generate(userId, params = {}) {
   const { providerId } = params || {};
 
@@ -42,6 +51,32 @@ async function generate(userId, params = {}) {
         modelFromUser ||
         (provider.config && provider.config.model) ||
         undefined;
+    }
+
+    const explicitTemperature = parseTemperature(finalParams.temperature);
+    if (explicitTemperature !== null) {
+      finalParams.temperature = explicitTemperature;
+    } else if (finalParams.temperature !== undefined) {
+      delete finalParams.temperature;
+    }
+
+    if (finalParams.temperature === undefined) {
+      const cfg =
+        provider && provider.config && typeof provider.config === "object"
+          ? provider.config
+          : {};
+      const modelTemps =
+        cfg.modelTemperatures && typeof cfg.modelTemperatures === "object"
+          ? cfg.modelTemperatures
+          : {};
+      const modelTemp =
+        finalParams.model && Object.prototype.hasOwnProperty.call(modelTemps, finalParams.model)
+          ? parseTemperature(modelTemps[finalParams.model])
+          : null;
+      const providerTemp = parseTemperature(cfg.temperature);
+
+      if (modelTemp !== null) finalParams.temperature = modelTemp;
+      else if (providerTemp !== null) finalParams.temperature = providerTemp;
     }
 
     const result = await adapter.generate(
