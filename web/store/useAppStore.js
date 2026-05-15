@@ -135,7 +135,7 @@ export const useAppStore = create((set, get) => ({
       socket: null,
     });
   },
-  setBootstrapData: (payload) => {
+  setBootstrapData: (payload = {}) => {
     const sortedChats = sortChats(payload.chats || []);
     const settings = payload.settings || {};
 
@@ -267,7 +267,10 @@ export const useAppStore = create((set, get) => ({
       };
     });
   },
-  updateMessageStatus: ({ messageId, status }) => {
+  updateMessageStatus: (payload = {}) => {
+    const { messageId, status } = payload;
+    if (!messageId || !status) return;
+
     set((state) => {
       const nextMessagesByChat = Object.fromEntries(
         Object.entries(state.messagesByChat).map(([chatId, messages]) => [
@@ -313,7 +316,10 @@ export const useAppStore = create((set, get) => ({
       },
     }));
   },
-  setTyping: ({ chatId, isTyping, name, userId }) => {
+  setTyping: (payload = {}) => {
+    const { chatId, isTyping, name, userId } = payload;
+    if (!chatId) return;
+
     set((state) => ({
       typingByChat: {
         ...state.typingByChat,
