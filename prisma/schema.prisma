@@ -41,20 +41,26 @@ enum MessageDirection {
 }
 
 model User {
-  id               String            @id @default(cuid())
-  name             String
-  email            String            @unique
-  passwordHash     String
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  contacts         Contact[]
-  chats            Chat[]
-  sessions         WhatsappSession[]
-  mediaFiles       MediaFile[]
-  apiKeys          ApiKey[]
-  aiProviders      AiProvider[]
-  terminalCommands TerminalCommand[]
-  userSetting      UserSetting?
+  id                 String                @id @default(cuid())
+  name               String
+  email              String                @unique
+  passwordHash       String
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  contacts           Contact[]
+  chats              Chat[]
+  sessions           WhatsappSession[]
+  mediaFiles         MediaFile[]
+  apiKeys            ApiKey[]
+  aiProviders        AiProvider[]
+  terminalCommands   TerminalCommand[]
+  userSetting        UserSetting?
+  crmAiSetting       CrmAiSetting?
+  crmSessionSettings CrmSessionAiSetting[]
+  crmChatSettings    CrmChatAiSetting[]
+  crmAutomationLogs  CrmAutomationLog[]
+  knowledgeDocuments KnowledgeDocument[]
+  knowledgeChunks    KnowledgeChunk[]
 
   @@map("users")
 }
@@ -76,20 +82,21 @@ model ApiKey {
 }
 
 model WhatsappSession {
-  id            String        @id @default(cuid())
+  id            String                @id @default(cuid())
   userId        String
   name          String
   phoneNumber   String?
-  status        SessionState  @default(disconnected)
+  status        SessionState          @default(disconnected)
   qrCode        String?
-  transportType TransportType @default(mock)
+  transportType TransportType         @default(mock)
   lastError     String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   chats         Chat[]
   messages      Message[]
   contacts      Contact[]
+  crmAiSettings CrmSessionAiSetting[]
 
   @@index([userId])
   @@map("whatsapp_sessions")
@@ -117,18 +124,20 @@ model Contact {
 }
 
 model Chat {
-  id        String           @id @default(cuid())
-  userId    String
-  sessionId String?
-  contactId String
-  title     String
-  pinnedAt  DateTime?
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  session   WhatsappSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-  contact   Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  messages  Message[]
+  id                String             @id @default(cuid())
+  userId            String
+  sessionId         String?
+  contactId         String
+  title             String
+  pinnedAt          DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session           WhatsappSession?   @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  contact           Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages          Message[]
+  crmAiSetting      CrmChatAiSetting?
+  crmAutomationLogs CrmAutomationLog[]
 
   @@unique([userId, contactId])
   @@index([userId, updatedAt])
@@ -245,4 +254,119 @@ model UserSetting {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_settings")
+}
+
+model CrmAiSetting {
+  id                          String   @id @default(cuid())
+  userId                      String   @unique
+  defaultMode                 String   @default("draft")
+  embeddingProviderId         String?
+  embeddingModel              String?
+  similarityThreshold         Float    @default(0.72)
+  maxChunks                   Int      @default(6)
+  cooldownSeconds             Int      @default(90)
+  maxAutoRepliesPerChatPerDay Int      @default(20)
+  fallbackMessage             String   @default("Terima kasih, pesan Anda akan dibantu admin kami.")
+  createdAt                   DateTime @default(now())
+  updatedAt                   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("crm_ai_settings")
+}
+
+model CrmSessionAiSetting {
+  id        String   @id @default(cuid())
+  userId    String
+  sessionId String
+  mode      String   @default("inherit")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session WhatsappSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sessionId])
+  @@index([userId])
+  @@map("crm_session_ai_settings")
+}
+
+model CrmChatAiSetting {
+  id        String   @id @default(cuid())
+  userId    String
+  chatId    String   @unique
+  mode      String   @default("inherit")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chatId])
+  @@index([userId])
+  @@map("crm_chat_ai_settings")
+}
+
+model CrmAutomationLog {
+  id                String   @id @default(cuid())
+  userId            String
+  chatId            String
+  mode              String
+  action            String
+  reason            String?
+  inboundMessageId  String?
+  outboundMessageId String?
+  draft             String?
+  sources           Json?
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([userId, chatId, createdAt])
+  @@index([userId, action, createdAt])
+  @@map("crm_automation_logs")
+}
+
+model KnowledgeDocument {
+  id           String   @id @default(cuid())
+  userId       String
+  title        String
+  fileName     String
+  originalName String
+  mimeType     String
+  size         Int
+  relativePath String
+  status       String   @default("processing")
+  error        String?
+  textLength   Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks KnowledgeChunk[]
+
+  @@index([userId, createdAt])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id             String   @id @default(cuid())
+  userId         String
+  documentId     String
+  content        String
+  embedding      Json?
+  embeddingModel String?
+  tokenCount     Int?
+  chunkIndex     Int
+  metadata       Json?
+  createdAt      DateTime @default(now())
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@index([userId, documentId])
+  @@map("knowledge_chunks")
 }

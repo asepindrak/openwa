@@ -8,6 +8,7 @@ const { getConfig } = require("./config");
 const { initializeDatabase } = require("./database/init");
 const { createApp } = require("./express/create-app");
 const chatService = require("./services/chat-service");
+const crmAutoReplyService = require("./services/crm-auto-reply-service");
 const sessionService = require("./services/session-service");
 const { registerSocketHandlers, userRoom } = require("./socket/register");
 const { ensureRuntimeDirs, webDir } = require("./utils/paths");
@@ -184,6 +185,20 @@ async function startOpenWA({ dev = false } = {}) {
         });
       } catch (err) {
         console.error("Webhook delivery failed:", err);
+      }
+
+      // Auto-reply for CRM chats when explicitly enabled.
+      try {
+        await crmAutoReplyService.maybeAutoReply({
+          userId: payload.userId,
+          chat: result.chat,
+          inboundMessage: result.message,
+          io,
+          sessionManager,
+          userRoom,
+        });
+      } catch (err) {
+        console.error("CRM auto-reply failed:", err);
       }
     } catch (error) {
       console.error("Failed to persist incoming WhatsApp message.", error);

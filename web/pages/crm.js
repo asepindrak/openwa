@@ -1,0 +1,1331 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/router";
+import {
+  MdArrowBack,
+  MdBolt,
+  MdCheckCircle,
+  MdDescription,
+  MdGroups,
+  MdInfo,
+  MdRefresh,
+  MdSearch,
+  MdSend,
+  MdSettings,
+  MdSmartToy,
+  MdUploadFile,
+} from "react-icons/md";
+import { AppHead } from "@/components/AppHead";
+import { BrandLogo } from "@/components/BrandLogo";
+import { apiFetch } from "@/lib/api";
+import { createSocket } from "@/lib/socket";
+import { useAppStore } from "@/store/useAppStore";
+
+const automationModes = [
+  { value: "inherit", label: "Use default" },
+  { value: "off", label: "Off" },
+  { value: "draft", label: "Draft only" },
+  { value: "auto", label: "Auto send" },
+];
+
+const globalModes = automationModes.filter((mode) => mode.value !== "inherit");
+
+const defaultCrmSettings = {
+  defaultMode: "draft",
+  embeddingProviderId: null,
+  embeddingModel: "",
+  similarityThreshold: 0.72,
+  maxChunks: 6,
+  cooldownSeconds: 90,
+  maxAutoRepliesPerChatPerDay: 20,
+  fallbackMessage: "Terima kasih, pesan Anda akan dibantu admin kami.",
+  sessionModes: {},
+  chatModes: {},
+};
+
+function formatTime(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("id-ID", {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
+function previewText(chat) {
+  return (
+    chat?.lastMessage?.body ||
+    chat?.contact?.lastMessagePreview ||
+    "No message preview"
+  );
+}
+
+function modeLabel(value) {
+  return automationModes.find((mode) => mode.value === value)?.label || value;
+}
+
+function resolveChatMode(settings, chat) {
+  const chatMode = settings.chatModes?.[chat?.id];
+  if (chatMode && chatMode !== "inherit") return chatMode;
+
+  const sessionMode = settings.sessionModes?.[chat?.sessionId];
+  if (sessionMode && sessionMode !== "inherit") return sessionMode;
+
+  return settings.defaultMode || "off";
+}
+
+function isInbound(message) {
+  return message?.direction === "inbound" || message?.direction === "incoming";
+}
+
+export default function CrmPage() {
+  const router = useRouter();
+  const fileInputRef = useRef(null);
+  const {
+    token,
+    hydrateAuth,
+    logout,
+    setBootstrapData,
+    setMessages,
+    setActiveChat,
+    addMessage,
+    upsertChat,
+    upsertSession,
+    updateMessageStatus,
+    setSocket,
+    socket,
+    chats,
+    sessions,
+    activeChatId,
+    messagesByChat,
+  } = useAppStore();
+
+  const [loading, setLoading] = useState(true);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [activeTab, setActiveTab] = useState("inbox");
+  const [draft, setDraft] = useState("");
+  const [draftSources, setDraftSources] = useState([]);
+  const [draftBusy, setDraftBusy] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [settings, setSettings] = useState(defaultCrmSettings);
+  const [knowledgeDocs, setKnowledgeDocs] = useState([]);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [aiProviders, setAiProviders] = useState([]);
+  const [reindexingDocId, setReindexingDocId] = useState(null);
+  const [knowledgeQuery, setKnowledgeQuery] = useState("");
+  const [knowledgeResults, setKnowledgeResults] = useState([]);
+  const [knowledgeSearching, setKnowledgeSearching] = useState(false);
+  const [knowledgeSearched, setKnowledgeSearched] = useState(false);
+  const [knowledgeChatQuestion, setKnowledgeChatQuestion] = useState("");
+  const [knowledgeChatAnswer, setKnowledgeChatAnswer] = useState("");
+  const [knowledgeChatSources, setKnowledgeChatSources] = useState([]);
+  const [knowledgeChatLoading, setKnowledgeChatLoading] = useState(false);
+  const [automationLogs, setAutomationLogs] = useState([]);
+
+  const activeChat = useMemo(
+    () => chats.find((chat) => chat.id === activeChatId) || null,
+    [activeChatId, chats],
+  );
+  const activeMessages = messagesByChat[activeChatId] || [];
+  const effectiveMode = resolveChatMode(settings, activeChat);
+
+  const filteredChats = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return chats;
+    return chats.filter((chat) => {
+      const text = [
+        chat.title,
+        chat.contact?.displayName,
+        chat.contact?.externalId,
+        previewText(chat),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return text.includes(needle);
+    });
+  }, [chats, query]);
+
+  const stats = useMemo(() => {
+    const auto = chats.filter(
+      (chat) => resolveChatMode(settings, chat) === "auto",
+    ).length;
+    const draftOnly = chats.filter(
+      (chat) => resolveChatMode(settings, chat) === "draft",
+    ).length;
+    return {
+      total: chats.length,
+      auto,
+      draftOnly,
+      handoff: chats.filter((chat) => resolveChatMode(settings, chat) === "off")
+        .length,
+    };
+  }, [chats, settings]);
+
+  const loadWorkspace = useCallback(async () => {
+    if (!token) return;
+    setLoading(true);
+    setError("");
+
+    try {
+      const data = await apiFetch("/api/bootstrap", { token });
+      setBootstrapData(data);
+    } catch (requestError) {
+      setError(requestError.message);
+      if (requestError.status === 401) {
+        logout();
+        router.replace("/");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [logout, router, setBootstrapData, token]);
+
+  const loadCrmData = useCallback(async () => {
+    if (!token) return;
+    setKnowledgeLoading(true);
+    try {
+      const [settingsData, documentsData] = await Promise.all([
+        apiFetch("/api/crm/settings", { token }),
+        apiFetch("/api/knowledge/documents", { token }),
+      ]);
+      setSettings({ ...defaultCrmSettings, ...(settingsData.settings || {}) });
+      setKnowledgeDocs(documentsData.documents || []);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setKnowledgeLoading(false);
+    }
+  }, [token]);
+
+  const loadAiProviders = useCallback(async () => {
+    if (!token) return;
+    try {
+      const data = await apiFetch("/api/ai-providers", { token });
+      setAiProviders(data.providers || []);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }, [token]);
+
+  const loadAutomationLogs = useCallback(
+    async (chatId = null) => {
+      if (!token) return;
+      try {
+        const suffix = chatId ? `?chatId=${encodeURIComponent(chatId)}` : "";
+        const data = await apiFetch(`/api/crm/logs${suffix}`, { token });
+        setAutomationLogs(data.logs || []);
+      } catch (requestError) {
+        setError(requestError.message);
+      }
+    },
+    [token],
+  );
+
+  useEffect(() => {
+    hydrateAuth();
+  }, [hydrateAuth]);
+
+  useEffect(() => {
+    if (!token) {
+      router.replace("/");
+      return;
+    }
+    loadWorkspace();
+    loadCrmData();
+    loadAiProviders();
+    loadAutomationLogs();
+  }, [loadAiProviders, loadAutomationLogs, loadCrmData, loadWorkspace, router, token]);
+
+  useEffect(() => {
+    if (!token || !activeChatId) return;
+    loadAutomationLogs(activeChatId);
+  }, [activeChatId, loadAutomationLogs, token]);
+
+  useEffect(() => {
+    if (!token) return undefined;
+
+    const socketClient = createSocket(token);
+    setSocket(socketClient);
+
+    socketClient.on("new_message", (message) => {
+      addMessage(message);
+    });
+    socketClient.on("contact_list_update", (chat) => {
+      upsertChat(chat);
+    });
+    socketClient.on("session_status_update", (session) => {
+      upsertSession(session);
+    });
+    socketClient.on("message_status_update", (payload) => {
+      updateMessageStatus(payload);
+    });
+    socketClient.on("crm_activity_update", (payload) => {
+      if (payload?.chatId) {
+        loadAutomationLogs(payload.chatId);
+      }
+    });
+
+    return () => {
+      socketClient.close();
+      setSocket(null);
+    };
+  }, [
+    addMessage,
+    setSocket,
+    token,
+    loadAutomationLogs,
+    updateMessageStatus,
+    upsertChat,
+    upsertSession,
+  ]);
+
+  useEffect(() => {
+    if (!activeChatId || !token || messagesByChat[activeChatId]) return;
+
+    setMessagesLoading(true);
+    apiFetch(`/api/chats/${activeChatId}/messages`, { token })
+      .then((data) => {
+        setMessages(activeChatId, data.messages, {
+          hasMore: Boolean(data.hasMore),
+          nextBefore: data.nextBefore || null,
+        });
+      })
+      .catch((requestError) => setError(requestError.message))
+      .finally(() => setMessagesLoading(false));
+  }, [activeChatId, messagesByChat, setMessages, token]);
+
+  async function saveCrmSettingsPatch(patch) {
+    setError("");
+    const previous = settings;
+    const optimistic = { ...settings, ...patch };
+    if (patch.sessionModes) {
+      optimistic.sessionModes = {
+        ...settings.sessionModes,
+        ...patch.sessionModes,
+      };
+    }
+    if (patch.chatModes) {
+      optimistic.chatModes = { ...settings.chatModes, ...patch.chatModes };
+    }
+    setSettings(optimistic);
+
+    try {
+      const data = await apiFetch("/api/crm/settings", {
+        method: "POST",
+        token,
+        body: patch,
+      });
+      setSettings({ ...defaultCrmSettings, ...(data.settings || {}) });
+    } catch (requestError) {
+      setSettings(previous);
+      setError(requestError.message);
+    }
+  }
+
+  function updateGlobalMode(value) {
+    saveCrmSettingsPatch({ defaultMode: value });
+  }
+
+  async function updateSessionMode(sessionId, value) {
+    await saveCrmSettingsPatch({ sessionModes: { [sessionId]: value } });
+  }
+
+  async function updateChatMode(chatId, value) {
+    await saveCrmSettingsPatch({ chatModes: { [chatId]: value } });
+  }
+
+  async function updateNumberSetting(key, value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return;
+    await saveCrmSettingsPatch({ [key]: parsed });
+  }
+
+  async function handleFilesSelected(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    setKnowledgeLoading(true);
+    setError("");
+    try {
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append("file", file);
+        const data = await apiFetch("/api/knowledge/documents", {
+          method: "POST",
+          token,
+          formData,
+        });
+        setKnowledgeDocs((current) => [data.document, ...current]);
+      }
+    } catch (requestError) {
+      setError(requestError.message);
+      await loadCrmData();
+    } finally {
+      setKnowledgeLoading(false);
+    }
+    event.target.value = "";
+  }
+
+  async function removeKnowledgeDoc(id) {
+    setError("");
+    const previous = knowledgeDocs;
+    setKnowledgeDocs((current) => current.filter((doc) => doc.id !== id));
+    try {
+      await apiFetch(`/api/knowledge/documents/${id}`, {
+        method: "DELETE",
+        token,
+      });
+    } catch (requestError) {
+      setKnowledgeDocs(previous);
+      setError(requestError.message);
+    }
+  }
+
+  async function reindexKnowledgeDoc(id) {
+    setReindexingDocId(id);
+    setError("");
+    try {
+      const data = await apiFetch(`/api/knowledge/documents/${id}/reindex`, {
+        method: "POST",
+        token,
+      });
+      setKnowledgeDocs((current) =>
+        current.map((doc) => (doc.id === id ? data.document : doc)),
+      );
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setReindexingDocId(null);
+    }
+  }
+
+  async function searchKnowledge(event) {
+    event.preventDefault();
+    if (!knowledgeQuery.trim()) return;
+
+    setKnowledgeSearching(true);
+    setKnowledgeSearched(true);
+    setError("");
+    try {
+      const data = await apiFetch("/api/knowledge/search", {
+        method: "POST",
+        token,
+        body: {
+          query: knowledgeQuery,
+          limit: settings.maxChunks,
+        },
+      });
+      setKnowledgeResults(data.results || []);
+    } catch (requestError) {
+      setKnowledgeResults([]);
+      setError(requestError.message);
+    } finally {
+      setKnowledgeSearching(false);
+    }
+  }
+
+  async function testKnowledgeChat(event) {
+    event.preventDefault();
+    if (!knowledgeChatQuestion.trim()) return;
+
+    setKnowledgeChatLoading(true);
+    setKnowledgeChatAnswer("");
+    setKnowledgeChatSources([]);
+    setError("");
+    try {
+      const data = await apiFetch("/api/knowledge/test-chat", {
+        method: "POST",
+        token,
+        body: {
+          question: knowledgeChatQuestion,
+        },
+      });
+      setKnowledgeChatAnswer(data.answer || "No answer generated.");
+      setKnowledgeChatSources(data.sources || []);
+    } catch (requestError) {
+      setKnowledgeChatAnswer("");
+      setKnowledgeChatSources([]);
+      setError(requestError.message);
+    } finally {
+      setKnowledgeChatLoading(false);
+    }
+  }
+
+  async function generateDraft() {
+    if (!activeChat) {
+      setDraft("Belum ada pesan customer yang bisa dijadikan konteks.");
+      return;
+    }
+
+    setDraftBusy(true);
+    setError("");
+    try {
+      const result = await apiFetch(`/api/crm/chats/${activeChat.id}/draft`, {
+        method: "POST",
+        token,
+      });
+      setDraft(String(result?.draft || settings.fallbackMessage).trim());
+      setDraftSources(result?.sources || []);
+    } catch (requestError) {
+      setDraft(settings.fallbackMessage);
+      setDraftSources([]);
+      setError(requestError.message);
+    } finally {
+      setDraftBusy(false);
+    }
+  }
+
+  async function sendDraft() {
+    if (!socket || !activeChatId || !draft.trim()) return;
+
+    setSending(true);
+    setError("");
+    try {
+      await new Promise((resolve, reject) => {
+        socket.emit(
+          "send_message",
+          {
+            chatId: activeChatId,
+            body: draft.trim(),
+            type: "text",
+          },
+          (response) => {
+            if (response?.ok) {
+              resolve(response);
+              return;
+            }
+            reject(new Error(response?.error || "Failed to send message."));
+          },
+        );
+      });
+      setDraft("");
+      setDraftSources([]);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (!token) return null;
+
+  return (
+    <>
+      <AppHead
+        title="CRM"
+        description="CRM dashboard untuk inbox, AI reply, automation, dan knowledge base OpenWA."
+      />
+
+      <main className="min-h-screen bg-[#111b21] text-white">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 bg-[#161717] px-5 py-4">
+          <div className="flex items-center gap-3">
+            <BrandLogo variant="square" className="h-10 w-10 rounded-xl" />
+            <div>
+              <p className="text-xs uppercase tracking-[0.22em] text-white/35">
+                OpenWA CRM
+              </p>
+              <h1 className="text-lg font-semibold text-white">
+                AI customer workspace
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-2xl bg-white/5 px-4 py-2 text-sm text-white/75 transition hover:bg-white/10"
+              onClick={() => router.push("/dashboard")}
+            >
+              <MdArrowBack />
+              Dashboard
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-2xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a]"
+              onClick={loadWorkspace}
+              disabled={loading}
+            >
+              <MdRefresh className={loading ? "animate-spin" : ""} />
+              {loading ? "Refreshing" : "Refresh"}
+            </button>
+          </div>
+        </header>
+
+        {error ? (
+          <div className="mx-5 mt-4 rounded-2xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+            {error}
+          </div>
+        ) : null}
+
+        <section className="grid min-h-[calc(100vh-73px)] grid-cols-1 lg:grid-cols-[320px_minmax(0,1fr)_360px]">
+          <aside className="border-b border-white/8 bg-[#161717] lg:border-b-0 lg:border-r">
+            <div className="border-b border-white/8 p-4">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-[18px] bg-[#242626] p-3">
+                  <p className="text-[11px] text-white/40">Inbox</p>
+                  <p className="mt-1 text-xl font-semibold">{stats.total}</p>
+                </div>
+                <div className="rounded-[18px] bg-[#242626] p-3">
+                  <p className="text-[11px] text-white/40">Auto</p>
+                  <p className="mt-1 text-xl font-semibold text-brand-200">
+                    {stats.auto}
+                  </p>
+                </div>
+                <div className="rounded-[18px] bg-[#242626] p-3">
+                  <p className="text-[11px] text-white/40">Draft</p>
+                  <p className="mt-1 text-xl font-semibold text-amber-200">
+                    {stats.draftOnly}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 flex items-center gap-2 rounded-2xl bg-[#242626] px-3 py-2">
+                <MdSearch className="text-white/35" />
+                <input
+                  className="min-w-0 flex-1 bg-transparent text-sm text-white outline-none placeholder:text-white/30"
+                  placeholder="Search customers"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="max-h-[55vh] overflow-y-auto lg:max-h-[calc(100vh-238px)]">
+              {filteredChats.map((chat) => {
+                const selected = chat.id === activeChatId;
+                const mode = resolveChatMode(settings, chat);
+                return (
+                  <button
+                    key={chat.id}
+                    type="button"
+                    className={`block w-full border-b border-white/6 px-4 py-3 text-left transition ${
+                      selected ? "bg-brand-500/12" : "hover:bg-white/[0.04]"
+                    }`}
+                    onClick={() => setActiveChat(chat.id)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-white">
+                          {chat.contact?.displayName || chat.title}
+                        </p>
+                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-white/45">
+                          {previewText(chat)}
+                        </p>
+                      </div>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${
+                          mode === "auto"
+                            ? "bg-brand-500/15 text-brand-100"
+                            : mode === "draft"
+                              ? "bg-amber-500/15 text-amber-100"
+                              : "bg-white/8 text-white/45"
+                        }`}
+                      >
+                        {mode}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+
+              {!filteredChats.length ? (
+                <div className="p-6 text-sm leading-6 text-white/45">
+                  No CRM conversations found.
+                </div>
+              ) : null}
+            </div>
+          </aside>
+
+          <section className="min-w-0 bg-[#0f1418]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/8 px-5 py-4">
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-[0.2em] text-white/35">
+                  Conversation
+                </p>
+                <h2 className="truncate text-base font-semibold text-white">
+                  {activeChat
+                    ? activeChat.contact?.displayName || activeChat.title
+                    : "Select a customer"}
+                </h2>
+              </div>
+              {activeChat ? (
+                <div className="flex items-center gap-2 rounded-2xl bg-[#242626] px-3 py-2 text-xs text-white/60">
+                  <MdBolt className="text-brand-200" />
+                  {modeLabel(effectiveMode)}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="h-[calc(100vh-220px)] overflow-y-auto px-5 py-5 lg:h-[calc(100vh-145px)]">
+              {messagesLoading ? (
+                <div className="rounded-[22px] bg-white/5 px-4 py-8 text-center text-sm text-white/45">
+                  Loading messages...
+                </div>
+              ) : null}
+
+              {!activeChat ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="max-w-sm text-center">
+                    <MdGroups className="mx-auto text-5xl text-white/20" />
+                    <h3 className="mt-3 text-base font-semibold text-white">
+                      Pick a CRM inbox item
+                    </h3>
+                    <p className="mt-2 text-sm leading-6 text-white/45">
+                      Conversation, automation status, and AI reply draft will
+                      appear here.
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+
+              {activeMessages.map((message) => {
+                const inbound = isInbound(message);
+                return (
+                  <div
+                    key={message.id}
+                    className={`mb-3 flex ${inbound ? "justify-start" : "justify-end"}`}
+                  >
+                    <div
+                      className={`max-w-[78%] rounded-[20px] px-4 py-3 text-sm leading-6 ${
+                        inbound
+                          ? "bg-[#242626] text-white/85"
+                          : "bg-brand-500 text-[#10251a]"
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap break-words">
+                        {message.body || message.mediaFile?.originalName || ""}
+                      </p>
+                      <p
+                        className={`mt-2 text-[11px] ${
+                          inbound ? "text-white/35" : "text-[#10251a]/55"
+                        }`}
+                      >
+                        {formatTime(message.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <aside className="border-t border-white/8 bg-[#161717] lg:border-l lg:border-t-0">
+            <div className="flex border-b border-white/8 px-3 pt-3">
+              {[
+                ["inbox", "Reply"],
+                ["knowledge", "Knowledge"],
+                ["automation", "Automation"],
+                ["activity", "Activity"],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`rounded-t-2xl px-3 py-2 text-sm ${
+                    activeTab === key
+                      ? "bg-white/5 text-white"
+                      : "text-white/50 hover:text-white/80"
+                  }`}
+                  onClick={() => setActiveTab(key)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {activeTab === "inbox" ? (
+              <div className="space-y-4 p-4">
+                <div className="rounded-[22px] bg-[#242626] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-white/35">
+                        Customer
+                      </p>
+                      <h3 className="mt-1 text-sm font-semibold text-white">
+                        {activeChat?.contact?.displayName ||
+                          activeChat?.title ||
+                          "No customer selected"}
+                      </h3>
+                    </div>
+                    <MdInfo className="text-xl text-white/30" />
+                  </div>
+                  <div className="mt-3 space-y-2 text-xs text-white/45">
+                    <p>{activeChat?.contact?.externalId || "No external id"}</p>
+                    <p>Updated {formatTime(activeChat?.updatedAt)}</p>
+                  </div>
+                </div>
+
+                <div className="rounded-[22px] bg-[#242626] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-white/35">
+                        AI Draft
+                      </p>
+                      <h3 className="mt-1 text-sm font-semibold text-white">
+                        Knowledge-aware reply
+                      </h3>
+                    </div>
+                    <MdSmartToy className="text-xl text-brand-200" />
+                  </div>
+
+                  <textarea
+                    className="mt-3 min-h-40 w-full rounded-[18px] bg-[#111b21] px-3 py-3 text-sm leading-6 text-white outline-none placeholder:text-white/30"
+                    placeholder="Generate or write a reply draft"
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                  />
+
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/5 px-3 py-2 text-sm font-medium text-white/80 transition hover:bg-white/10"
+                      onClick={generateDraft}
+                      disabled={!activeChat || draftBusy}
+                    >
+                      <MdSmartToy />
+                      {draftBusy ? "Generating" : "Generate"}
+                    </button>
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand-500 px-3 py-2 text-sm font-semibold text-[#10251a]"
+                      onClick={sendDraft}
+                      disabled={!activeChat || !draft.trim() || sending}
+                    >
+                      <MdSend />
+                      {sending ? "Sending" : "Send"}
+                    </button>
+                  </div>
+
+                  {draftSources.length ? (
+                    <div className="mt-4 rounded-[18px] bg-[#111b21] p-3">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                        Sources
+                      </p>
+                      <div className="mt-2 space-y-2">
+                        {draftSources.map((source) => (
+                          <div key={source.id} className="text-xs leading-5">
+                            <p className="font-medium text-white/75">
+                              {source.fileName || source.documentTitle}
+                            </p>
+                            <p className="line-clamp-2 text-white/40">
+                              {source.content}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "knowledge" ? (
+              <div className="space-y-4 p-4">
+                <div className="rounded-[22px] bg-[#242626] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-white/35">
+                        Knowledge Base
+                      </p>
+                      <h3 className="mt-1 text-sm font-semibold text-white">
+                        SQLite local store
+                      </h3>
+                    </div>
+                    <MdDescription className="text-xl text-brand-200" />
+                  </div>
+                  <p className="mt-2 text-xs leading-5 text-white/45">
+                    Files are stored in SQLite-backed knowledge records. TXT and
+                    CSV extract immediately; PDF, DOCX, and XLSX use optional
+                    extractor packages when installed.
+                  </p>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    accept=".txt,.pdf,.docx,.xlsx,.csv"
+                    onChange={handleFilesSelected}
+                  />
+                  <button
+                    type="button"
+                    className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={knowledgeLoading}
+                  >
+                    <MdUploadFile />
+                    {knowledgeLoading
+                      ? "Processing files"
+                      : "Add knowledge files"}
+                  </button>
+                </div>
+
+                <form
+                  className="rounded-[22px] bg-[#242626] p-4"
+                  onSubmit={searchKnowledge}
+                >
+                  <h3 className="text-sm font-semibold text-white">
+                    Test retrieval
+                  </h3>
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      className="min-w-0 flex-1 rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                      placeholder="Ask a product or policy question"
+                      value={knowledgeQuery}
+                      onChange={(event) => setKnowledgeQuery(event.target.value)}
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-2xl bg-white/5 px-3 py-2 text-sm font-medium text-white/75"
+                      disabled={knowledgeSearching}
+                    >
+                      {knowledgeSearching ? "Searching" : "Search"}
+                    </button>
+                  </div>
+                  {knowledgeResults.length ? (
+                    <div className="mt-3 space-y-2">
+                      {knowledgeResults.map((result) => (
+                        <div
+                          key={result.id}
+                          className="rounded-[16px] bg-[#111b21] p-3 text-xs leading-5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="truncate font-medium text-white/75">
+                              {result.fileName || result.documentTitle}
+                            </p>
+                            <span className="shrink-0 text-white/35">
+                              {result.searchMode} {result.score.toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="mt-2 line-clamp-3 text-white/45">
+                            {result.content}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {knowledgeSearched &&
+                  !knowledgeSearching &&
+                  !knowledgeResults.length ? (
+                    <div className="mt-3 rounded-[16px] bg-[#111b21] p-3 text-xs leading-5 text-white/45">
+                      No matching chunks found. Make sure at least one document
+                      is ready, then try a keyword from the document or lower
+                      the similarity threshold.
+                    </div>
+                  ) : null}
+                </form>
+
+                <form
+                  className="rounded-[22px] bg-[#242626] p-4"
+                  onSubmit={testKnowledgeChat}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-white/35">
+                        AI Test Chat
+                      </p>
+                      <h3 className="mt-1 text-sm font-semibold text-white">
+                        Ask using knowledge base
+                      </h3>
+                    </div>
+                    <MdSmartToy className="text-xl text-brand-200" />
+                  </div>
+
+                  <textarea
+                    className="mt-3 min-h-24 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm leading-6 text-white outline-none placeholder:text-white/30"
+                    placeholder="Contoh: Berapa harga paket premium?"
+                    value={knowledgeChatQuestion}
+                    onChange={(event) =>
+                      setKnowledgeChatQuestion(event.target.value)
+                    }
+                  />
+                  <button
+                    type="submit"
+                    className="mt-3 w-full rounded-2xl bg-brand-500 px-4 py-3 text-sm font-semibold text-[#10251a]"
+                    disabled={knowledgeChatLoading}
+                  >
+                    {knowledgeChatLoading ? "Asking AI..." : "Ask AI"}
+                  </button>
+
+                  {knowledgeChatAnswer ? (
+                    <div className="mt-4 rounded-[18px] bg-[#111b21] p-3">
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-white/35">
+                        Answer
+                      </p>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-white/75">
+                        {knowledgeChatAnswer}
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {knowledgeChatSources.length ? (
+                    <div className="mt-3 space-y-2">
+                      {knowledgeChatSources.map((source) => (
+                        <div
+                          key={source.id}
+                          className="rounded-[16px] bg-[#111b21] p-3 text-xs leading-5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="truncate font-medium text-white/75">
+                              {source.fileName || source.documentTitle}
+                            </p>
+                            <span className="shrink-0 text-white/35">
+                              {source.searchMode} {source.score.toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="mt-2 line-clamp-3 text-white/45">
+                            {source.content}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </form>
+
+                <div className="space-y-2">
+                  {knowledgeDocs.map((doc) => (
+                    <div
+                      key={doc.id}
+                      className="rounded-[18px] bg-[#242626] px-3 py-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-white">
+                            {doc.originalName || doc.title || doc.fileName}
+                          </p>
+                          <p className="mt-1 text-xs text-white/40">
+                            {Math.ceil((doc.size || 0) / 1024)} KB -{" "}
+                            {doc.status}
+                            {doc.chunkCount
+                              ? ` - ${doc.chunkCount} chunks`
+                              : ""}
+                          </p>
+                          {doc.error ? (
+                            <p className="mt-2 text-xs leading-5 text-red-200/80">
+                              {doc.error}
+                            </p>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className="rounded-full bg-white/5 px-3 py-1.5 text-xs text-white/60"
+                          onClick={() => reindexKnowledgeDoc(doc.id)}
+                          disabled={reindexingDocId === doc.id}
+                        >
+                          {reindexingDocId === doc.id ? "Indexing" : "Reindex"}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-full bg-white/5 px-3 py-1.5 text-xs text-white/60"
+                          onClick={() => removeKnowledgeDoc(doc.id)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {!knowledgeDocs.length && !knowledgeLoading ? (
+                    <div className="rounded-[18px] bg-[#242626] p-5 text-center text-sm leading-6 text-white/45">
+                      No knowledge files queued yet.
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "automation" ? (
+              <div className="space-y-4 p-4">
+                <div className="rounded-[22px] bg-[#242626] p-4">
+                  <div className="flex items-center gap-2">
+                    <MdSettings className="text-brand-200" />
+                    <h3 className="text-sm font-semibold text-white">
+                      Auto-reply settings
+                    </h3>
+                  </div>
+
+                  <label className="mt-4 block text-xs font-medium text-white/45">
+                    Global mode
+                  </label>
+                  <select
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-3 text-sm text-white outline-none"
+                    value={settings.defaultMode}
+                    onChange={(event) => updateGlobalMode(event.target.value)}
+                  >
+                    {globalModes.map((mode) => (
+                      <option key={mode.value} value={mode.value}>
+                        {mode.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <label className="mt-4 block text-xs font-medium text-white/45">
+                    Active chat override
+                  </label>
+                  <select
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-3 text-sm text-white outline-none"
+                    value={
+                      activeChat
+                        ? settings.chatModes?.[activeChat.id] || "inherit"
+                        : "inherit"
+                    }
+                    onChange={(event) =>
+                      activeChat && updateChatMode(activeChat.id, event.target.value)
+                    }
+                    disabled={!activeChat}
+                  >
+                    {automationModes.map((mode) => (
+                      <option key={mode.value} value={mode.value}>
+                        {mode.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="mt-4 rounded-[18px] bg-[#111b21] p-3 text-xs leading-5 text-white/45">
+                    Effective mode:{" "}
+                    <span className="font-semibold text-white">
+                      {modeLabel(effectiveMode)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-[22px] bg-[#242626] p-4">
+                  <h3 className="text-sm font-semibold text-white">
+                    Session overrides
+                  </h3>
+                  <div className="mt-3 space-y-3">
+                    {sessions.map((session) => (
+                      <div key={session.id}>
+                        <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                          <span className="truncate text-white/65">
+                            {session.name}
+                          </span>
+                          <span className="text-white/35">{session.status}</span>
+                        </div>
+                        <select
+                          className="w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none"
+                          value={settings.sessionModes?.[session.id] || "inherit"}
+                          onChange={(event) =>
+                            updateSessionMode(session.id, event.target.value)
+                          }
+                        >
+                          {automationModes.map((mode) => (
+                            <option key={mode.value} value={mode.value}>
+                              {mode.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                    {!sessions.length ? (
+                      <p className="text-sm text-white/45">
+                        No WhatsApp sessions configured.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="rounded-[22px] bg-[#242626] p-4">
+                  <h3 className="text-sm font-semibold text-white">
+                    Retrieval tuning
+                  </h3>
+                  <label className="mt-3 block text-xs text-white/45">
+                    Embedding provider
+                  </label>
+                  <select
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none"
+                    value={settings.embeddingProviderId || ""}
+                    onChange={(event) =>
+                      saveCrmSettingsPatch({
+                        embeddingProviderId: event.target.value || null,
+                      })
+                    }
+                  >
+                    <option value="">Keyword fallback only</option>
+                    {aiProviders.map((provider) => (
+                      <option key={provider.id} value={provider.id}>
+                        {provider.name} ({provider.provider})
+                      </option>
+                    ))}
+                  </select>
+                  <label className="mt-3 block text-xs text-white/45">
+                    Embedding model
+                  </label>
+                  <input
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                    placeholder="text-embedding-3-small or nomic-embed-text"
+                    value={settings.embeddingModel || ""}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        embeddingModel: event.target.value,
+                      }))
+                    }
+                    onBlur={(event) =>
+                      saveCrmSettingsPatch({
+                        embeddingModel: event.target.value,
+                      })
+                    }
+                  />
+                  <label className="mt-3 block text-xs text-white/45">
+                    Similarity threshold
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none"
+                    value={settings.similarityThreshold}
+                    onChange={(event) =>
+                      updateNumberSetting(
+                        "similarityThreshold",
+                        event.target.value,
+                      )
+                    }
+                  />
+                  <label className="mt-3 block text-xs text-white/45">
+                    Max knowledge chunks
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="12"
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none"
+                    value={settings.maxChunks}
+                    onChange={(event) =>
+                      updateNumberSetting("maxChunks", event.target.value)
+                    }
+                  />
+                  <label className="mt-3 block text-xs text-white/45">
+                    Auto-reply cooldown seconds
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="3600"
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none"
+                    value={settings.cooldownSeconds}
+                    onChange={(event) =>
+                      updateNumberSetting("cooldownSeconds", event.target.value)
+                    }
+                  />
+                  <label className="mt-3 block text-xs text-white/45">
+                    Max auto replies per chat per day
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="200"
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none"
+                    value={settings.maxAutoRepliesPerChatPerDay}
+                    onChange={(event) =>
+                      updateNumberSetting(
+                        "maxAutoRepliesPerChatPerDay",
+                        event.target.value,
+                      )
+                    }
+                  />
+                  <label className="mt-3 block text-xs text-white/45">
+                    Fallback message
+                  </label>
+                  <textarea
+                    className="mt-2 min-h-24 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm leading-6 text-white outline-none"
+                    value={settings.fallbackMessage}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        fallbackMessage: event.target.value,
+                      }))
+                    }
+                    onBlur={(event) =>
+                      saveCrmSettingsPatch({
+                        fallbackMessage: event.target.value,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="rounded-[22px] bg-brand-500/10 p-4 text-xs leading-5 text-brand-100">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <MdCheckCircle />
+                    Safety guard
+                  </div>
+                  <p className="mt-2">
+                    Auto-reply is skipped during cooldown and after the daily
+                    limit is reached. Every skip or send is saved in Activity.
+                  </p>
+                </div>
+
+                <div className="rounded-[22px] bg-brand-500/10 p-4 text-xs leading-5 text-brand-100">
+                  <div className="flex items-center gap-2 font-semibold">
+                    <MdCheckCircle />
+                    Priority order
+                  </div>
+                  <p className="mt-2">
+                    Chat override wins over session override, then global mode.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "activity" ? (
+              <div className="space-y-3 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.2em] text-white/35">
+                      Automation Activity
+                    </p>
+                    <h3 className="mt-1 text-sm font-semibold text-white">
+                      {activeChat ? "Current chat log" : "Recent CRM log"}
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-full bg-white/5 px-3 py-1.5 text-xs text-white/70"
+                    onClick={() => loadAutomationLogs(activeChat?.id || null)}
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {automationLogs.map((log) => (
+                  <div key={log.id} className="rounded-[18px] bg-[#242626] p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-white">
+                          {log.action}
+                        </p>
+                        <p className="mt-1 text-xs text-white/40">
+                          {modeLabel(log.mode)} - {formatTime(log.createdAt)}
+                        </p>
+                      </div>
+                      {log.reason ? (
+                        <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] text-white/55">
+                          {log.reason}
+                        </span>
+                      ) : null}
+                    </div>
+                    {log.draft ? (
+                      <p className="mt-3 line-clamp-3 text-xs leading-5 text-white/55">
+                        {log.draft}
+                      </p>
+                    ) : null}
+                  </div>
+                ))}
+
+                {!automationLogs.length ? (
+                  <div className="rounded-[18px] bg-[#242626] p-5 text-center text-sm leading-6 text-white/45">
+                    No automation activity yet.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </aside>
+        </section>
+      </main>
+    </>
+  );
+}

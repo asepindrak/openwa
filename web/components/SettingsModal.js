@@ -117,6 +117,44 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+const webhookReceiverExample = `app.post("/openwa-webhook", express.json(), (req, res) => {
+  const key = req.get("x-openwa-webhook-key");
+  if (key !== process.env.OPENWA_WEBHOOK_KEY) {
+    return res.status(401).json({ ok: false });
+  }
+
+  const { chat, message } = req.body;
+  console.log("Incoming WhatsApp message", {
+    chatId: chat.id,
+    from: message.sender,
+    text: message.body,
+  });
+
+  res.json({ ok: true });
+});`;
+
+const webhookPayloadExample = `{
+  "chat": {
+    "id": "6281234567890@c.us",
+    "title": "Customer Name",
+    "sessionId": "session_123",
+    "updatedAt": "2026-05-13T08:30:00.000Z"
+  },
+  "message": {
+    "id": "msg_123",
+    "chatId": "6281234567890@c.us",
+    "sessionId": "session_123",
+    "sender": "6281234567890@c.us",
+    "receiver": "6289876543210@c.us",
+    "body": "Halo, saya mau tanya produk",
+    "type": "chat",
+    "direction": "incoming",
+    "createdAt": "2026-05-13T08:30:00.000Z",
+    "mediaFile": null,
+    "statuses": []
+  }
+}`;
+
 export function SettingsModal({
   open,
   sessions,
@@ -152,6 +190,7 @@ export function SettingsModal({
   webhookLoading,
 }) {
   const [copied, setCopied] = useState(false);
+  const [copiedWebhookExample, setCopiedWebhookExample] = useState(null);
   const token = useAppStore((s) => s.token);
   const setActiveChat = useAppStore((s) => s.setActiveChat);
   const upsertChat = useAppStore((s) => s.upsertChat);
@@ -225,6 +264,12 @@ export function SettingsModal({
     if (parsed < 0) return "0";
     if (parsed > 2) return "2";
     return String(Math.round(parsed * 10) / 10);
+  }
+
+  async function copyWebhookExample(kind, value) {
+    await navigator.clipboard.writeText(value);
+    setCopiedWebhookExample(kind);
+    setTimeout(() => setCopiedWebhookExample(null), 1500);
   }
 
   useEffect(() => {
@@ -974,6 +1019,70 @@ export function SettingsModal({
                       </button>
                     </div>
                   </form>
+
+                  <div className="mt-5 grid gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="text-sm font-semibold text-white">
+                          Example receiver
+                        </h4>
+                        <button
+                          type="button"
+                          className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/75 transition hover:bg-white/10"
+                          onClick={() =>
+                            copyWebhookExample(
+                              "receiver",
+                              webhookReceiverExample,
+                            )
+                          }
+                        >
+                          {copiedWebhookExample === "receiver"
+                            ? "Copied"
+                            : "Copy receiver"}
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-white/45">
+                        Set your webhook URL to this route, then use the same
+                        API key value as{" "}
+                        <span className="font-mono">
+                          OPENWA_WEBHOOK_KEY
+                        </span>
+                        .
+                      </p>
+                      <pre className="mt-3 max-h-72 overflow-auto rounded-[18px] bg-[#0f1010] p-4 text-xs leading-5 text-white/70">
+                        <code>{webhookReceiverExample}</code>
+                      </pre>
+                    </div>
+
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="text-sm font-semibold text-white">
+                          Example payload
+                        </h4>
+                        <button
+                          type="button"
+                          className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/75 transition hover:bg-white/10"
+                          onClick={() =>
+                            copyWebhookExample("payload", webhookPayloadExample)
+                          }
+                        >
+                          {copiedWebhookExample === "payload"
+                            ? "Copied"
+                            : "Copy payload"}
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-white/45">
+                        OpenWA sends this payload as JSON with header{" "}
+                        <span className="font-mono">
+                          x-openwa-webhook-key
+                        </span>
+                        .
+                      </p>
+                      <pre className="mt-3 max-h-72 overflow-auto rounded-[18px] bg-[#0f1010] p-4 text-xs leading-5 text-white/70">
+                        <code>{webhookPayloadExample}</code>
+                      </pre>
+                    </div>
+                  </div>
                 </div>
               )}
 

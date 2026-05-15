@@ -28,6 +28,7 @@ const workspacesDir = process.env.OPENWA_WORKSPACES_DIR
 const legacyWorkspacesDir = path.join(rootDir, "workspaces");
 const sessionsDir = path.join(storageDir, "sessions");
 const mediaDir = path.join(storageDir, "media");
+const knowledgeDir = path.join(storageDir, "knowledge");
 const databaseDir = path.join(storageDir, "database");
 const prismaSchemaPath = path.join(rootDir, "prisma", "schema.prisma");
 const webDir = path.join(rootDir, "web");
@@ -153,7 +154,7 @@ function ensureRuntimeDirs() {
     // ignore
   }
 
-  [storageDir, sessionsDir, mediaDir, databaseDir, workspacesDir].forEach(
+  [storageDir, sessionsDir, mediaDir, knowledgeDir, databaseDir, workspacesDir].forEach(
     ensureDir,
   );
 }
@@ -163,6 +164,7 @@ module.exports = {
   storageDir,
   sessionsDir,
   mediaDir,
+  knowledgeDir,
   databaseDir,
   workspacesDir,
   prismaSchemaPath,

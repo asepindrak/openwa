@@ -25,6 +25,9 @@ const terminalService = require("../services/terminal-service");
 const toolCredentialService = require("../services/tool-credential-service");
 const authConfigService = require("../services/auth-config-service");
 const userSettings = require("../services/user-settings");
+const crmService = require("../services/crm-service");
+const crmAutoReplyService = require("../services/crm-auto-reply-service");
+const knowledgeService = require("../services/knowledge-service");
 const TelegramService = require("../services/telegram-service");
 const { prisma } = require("../database/client");
 const {
@@ -35,7 +38,12 @@ const {
   packageVersion,
 } = require("./openapi");
 const { initializeDatabase } = require("../database/init");
-const { mediaDir, storageDir, ensureRuntimeDirs } = require("../utils/paths");
+const {
+  mediaDir,
+  knowledgeDir,
+  storageDir,
+  ensureRuntimeDirs,
+} = require("../utils/paths");
 
 function removeDirectoryContents(dirPath) {
   if (!fs.existsSync(dirPath)) {
@@ -77,6 +85,18 @@ function inferMessageType(file) {
 function createUploader() {
   const storage = multer.diskStorage({
     destination: mediaDir,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `${crypto.randomUUID()}${ext}`);
+    },
+  });
+
+  return multer({ storage });
+}
+
+function createKnowledgeUploader() {
+  const storage = multer.diskStorage({
+    destination: knowledgeDir,
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname);
       cb(null, `${crypto.randomUUID()}${ext}`);
@@ -181,6 +201,7 @@ function createApp({ config, sessionManager }) {
   });
 
   const upload = createUploader();
+  const knowledgeUpload = createKnowledgeUploader();
   const requireAuth = authMiddleware(config);
   const requireDashboardAuth = dashboardAuthMiddleware(config);
   const openApiDocument = createOpenApiDocument(config);
@@ -846,6 +867,170 @@ function createApp({ config, sessionManager }) {
       const result = await llmService.generate(req.user.id, params);
       res.json({ result });
     }),
+  );
+
+  app.get(
+    "/api/crm/settings",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const settings = await crmService.getSettings(req.user.id);
+      res.json({ settings });
+    }),
+  );
+
+  app.post(
+    "/api/crm/settings",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const settings = await crmService.updateSettings(req.user.id, req.body);
+      res.json({ ok: true, settings });
+    }, 400),
+  );
+
+  app.post(
+    "/api/crm/sessions/:sessionId/settings",
+    requireAuth,
+    withAsync(async (req, res) => {
+      await crmService.setSessionMode(
+        req.user.id,
+        req.params.sessionId,
+        req.body?.mode || "inherit",
+      );
+      const settings = await crmService.getSettings(req.user.id);
+      res.json({ ok: true, settings });
+    }, 400),
+  );
+
+  app.post(
+    "/api/crm/chats/:chatId/settings",
+    requireAuth,
+    withAsync(async (req, res) => {
+      await crmService.setChatMode(
+        req.user.id,
+        req.params.chatId,
+        req.body?.mode || "inherit",
+      );
+      const settings = await crmService.getSettings(req.user.id);
+      res.json({ ok: true, settings });
+    }, 400),
+  );
+
+  app.post(
+    "/api/crm/chats/:chatId/draft",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const result = await crmAutoReplyService.generateDraft(
+        req.user.id,
+        req.params.chatId,
+      );
+      await crmService.createAutomationLog(req.user.id, {
+        chatId: req.params.chatId,
+        mode: "draft",
+        action: "draft_generated",
+        draft: result.draft,
+        sources: result.sources || [],
+      });
+      res.json(result);
+    }, 400),
+  );
+
+  app.get(
+    "/api/crm/logs",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const logs = await crmService.listAutomationLogs(req.user.id, {
+        chatId: req.query.chatId,
+        limit: req.query.limit,
+      });
+      res.json({ logs });
+    }),
+  );
+
+  app.get(
+    "/api/knowledge/documents",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const documents = await knowledgeService.listDocuments(req.user.id);
+      res.json({ documents });
+    }),
+  );
+
+  app.post(
+    "/api/knowledge/search",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const query = String(req.body?.query || "").trim();
+      if (!query) return res.status(400).json({ error: "query is required." });
+      const results = await knowledgeService.searchChunks(req.user.id, query, {
+        limit: req.body?.limit,
+      });
+      res.json({ results });
+    }, 400),
+  );
+
+  app.post(
+    "/api/knowledge/test-chat",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const question = String(req.body?.question || "").trim();
+      if (!question) {
+        return res.status(400).json({ error: "question is required." });
+      }
+      const result = await crmAutoReplyService.testKnowledgeChat(
+        req.user.id,
+        question,
+      );
+      res.json(result);
+    }, 400),
+  );
+
+  app.post(
+    "/api/knowledge/documents",
+    requireAuth,
+    knowledgeUpload.single("file"),
+    withAsync(async (req, res) => {
+      const document = await knowledgeService.createDocumentFromUpload(
+        req.user.id,
+        req.file,
+      );
+      res.status(201).json({ document });
+    }, 400),
+  );
+
+  app.get(
+    "/api/knowledge/documents/:documentId/chunks",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const result = await knowledgeService.getDocumentChunks(
+        req.user.id,
+        req.params.documentId,
+      );
+      res.json(result);
+    }, 404),
+  );
+
+  app.delete(
+    "/api/knowledge/documents/:documentId",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const result = await knowledgeService.deleteDocument(
+        req.user.id,
+        req.params.documentId,
+      );
+      res.json(result);
+    }, 400),
+  );
+
+  app.post(
+    "/api/knowledge/documents/:documentId/reindex",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const document = await knowledgeService.reindexDocument(
+        req.user.id,
+        req.params.documentId,
+      );
+      res.json({ ok: true, document });
+    }, 400),
   );
 
   app.get("/api/bootstrap", requireAuth, async (req, res) => {

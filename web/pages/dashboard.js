@@ -877,6 +877,7 @@ export default function DashboardPage() {
                 onDeleteMessage={handleDeleteMessage}
                 onForwardMessage={handleForwardMessage}
                 onOpenContacts={() => setContactsPanelOpen(true)}
+                onOpenCrm={() => router.push("/crm")}
                 onOpenSettings={() => setSettingsOpen(true)}
                 onLogout={() => {
                   logout();

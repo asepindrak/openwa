@@ -23,6 +23,7 @@ import {
   MdAdd,
   MdSettings,
   MdLogout,
+  MdGroups,
   MdClose,
   MdFlashOn,
   MdRefresh,
@@ -487,6 +488,7 @@ export const ChatWindow = forwardRef(function ChatWindow(
     onDeleteMessage,
     onForwardMessage,
     onOpenContacts,
+    onOpenCrm,
     onOpenSettings,
     onLogout,
   },
@@ -1209,6 +1211,16 @@ export const ChatWindow = forwardRef(function ChatWindow(
             onClick={onOpenContacts}
           >
             <MdAdd className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            title="Open CRM"
+            aria-label="Open CRM"
+            className="relative flex h-10 w-10 items-center justify-center rounded-full bg-amber-400 text-[#1d1600] shadow-[0_0_22px_rgba(251,191,36,0.42)] ring-1 ring-amber-100/70 transition hover:scale-105 hover:bg-amber-300 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            onClick={onOpenCrm}
+          >
+            <span className="absolute inset-0 rounded-full bg-amber-300/35 animate-ping" />
+            <MdGroups className="relative h-5 w-5" />
           </button>
           <button
             type="button"
