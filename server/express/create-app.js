@@ -18,6 +18,7 @@ const chatService = require("../services/chat-service");
 const assistantService = require("../services/assistant-service");
 const sessionService = require("../services/session-service");
 const webhookService = require("../services/webhook-service");
+const outboundDeliveryService = require("../services/outbound-delivery-service");
 const aiProviderService = require("../services/ai-provider-service");
 const llmService = require("../services/llm-service");
 const agentService = require("../services/agent-service");
@@ -29,7 +30,6 @@ const crmService = require("../services/crm-service");
 const crmAutoReplyService = require("../services/crm-auto-reply-service");
 const knowledgeService = require("../services/knowledge-service");
 const TelegramConfigService = require("../services/telegram-config-service");
-const TelegramService = require("../services/telegram-service");
 const { prisma } = require("../database/client");
 const {
   createAgentReadme,
@@ -189,6 +189,33 @@ function withAsync(handler, statusCode = 500) {
       });
     }
   };
+}
+
+async function deliverOutgoingApiMessage({
+  userId,
+  result,
+  sessionManager,
+  io,
+}) {
+  const message = result?.message;
+  if (!message) return result;
+
+  const deliveryJob = await outboundDeliveryService.enqueueMessage({
+    userId,
+    messageId: message.id,
+    sessionManager,
+    io,
+  });
+  result.deliveryJob = outboundDeliveryService.serializeJob(deliveryJob);
+
+  if (deliveryJob?.status === "delivered") {
+    message.statuses = [
+      ...(message.statuses || []),
+      { status: "delivered", createdAt: deliveryJob.deliveredAt || new Date() },
+    ];
+  }
+
+  return result;
 }
 
 function createApp({ config, sessionManager }) {
@@ -579,6 +606,62 @@ function createApp({ config, sessionManager }) {
       webhookService.deleteWebhook(req.user.id);
       res.json({ ok: true });
     }),
+  );
+
+  app.get(
+    "/api/webhook/deliveries",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const deliveries = await webhookService.listDeliveries(req.user.id, {
+        status: req.query.status,
+        chatId: req.query.chatId,
+        limit: req.query.limit,
+      });
+      res.json({ deliveries });
+    }),
+  );
+
+  app.post(
+    "/api/webhook/deliveries/:deliveryId/retry",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const result = await webhookService.retryDelivery(
+        req.user.id,
+        req.params.deliveryId,
+      );
+      res.json(result);
+    }, 400),
+  );
+
+  app.get(
+    "/api/outbound-deliveries",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const deliveries = await outboundDeliveryService.listJobs(req.user.id, {
+        status: req.query.status,
+        chatId: req.query.chatId,
+        limit: req.query.limit,
+      });
+      res.json({
+        deliveries: deliveries.map(outboundDeliveryService.serializeJob),
+      });
+    }),
+  );
+
+  app.post(
+    "/api/outbound-deliveries/:deliveryId/retry",
+    requireAuth,
+    withAsync(async (req, res) => {
+      const delivery = await outboundDeliveryService.retryJob(
+        req.user.id,
+        req.params.deliveryId,
+        {
+          sessionManager,
+          io: req.app.get("io"),
+        },
+      );
+      res.json({ delivery: outboundDeliveryService.serializeJob(delivery) });
+    }, 400),
   );
 
   app.get(
@@ -1512,7 +1595,7 @@ function createApp({ config, sessionManager }) {
         throw new Error("chatId or phoneNumber is required.");
       }
 
-      if (!requestedSessionId) {
+      if (!requestedSessionId && !chatId) {
         throw new Error("sessionId is required.");
       }
 
@@ -1571,9 +1654,13 @@ function createApp({ config, sessionManager }) {
         }
         if (
           existingChat.sessionId &&
+          requestedSessionId &&
           existingChat.sessionId !== requestedSessionId
         ) {
           throw new Error("sessionId does not match the chat's sessionId.");
+        }
+        if (existingChat.sessionId) {
+          chosenSessionId = existingChat.sessionId;
         }
         targetChat = existingChat;
       } else {
@@ -1610,20 +1697,12 @@ function createApp({ config, sessionManager }) {
         replyToId,
       });
 
-      if (result.message.sessionId) {
-        await sessionManager.sendMessage(result.message.sessionId, {
-          recipient: result.message.receiver,
-          body: result.message.body,
-          mediaFileId: result.message.mediaFileId,
-          mediaPath: result.message.mediaFile?.relativePath || null,
-        });
-
-        await chatService.addMessageStatus(result.message.id, "delivered");
-        result.message.statuses = [
-          ...(result.message.statuses || []),
-          { status: "delivered", createdAt: new Date().toISOString() },
-        ];
-      }
+      await deliverOutgoingApiMessage({
+        userId: req.user.id,
+        result,
+        sessionManager,
+        io: req.app.get("io"),
+      });
 
       res.json(result);
     } catch (error) {
@@ -1718,29 +1797,67 @@ function createApp({ config, sessionManager }) {
           // ignore lookups and fall back to normal send
         }
 
+        const type = req.body.type || "text";
+        const mediaFileId = req.body.mediaFileId || null;
+        const mediaUrl = req.body.mediaUrl || null;
+        let effectiveType = type;
+        let effectiveMediaFileId = mediaFileId;
+
+        if (type === "text") {
+          if (mediaUrl) {
+            throw new Error("mediaUrl is only allowed for media message types.");
+          }
+          if (mediaFileId) {
+            throw new Error(
+              "mediaFileId is only allowed for media message types.",
+            );
+          }
+          if (!req.body.body) {
+            throw new Error("body is required for text messages.");
+          }
+        }
+
+        const mediaTypes = ["image", "video", "audio", "document", "sticker"];
+        const isMediaType = mediaTypes.includes(type);
+        if (isMediaType && !mediaFileId && !mediaUrl) {
+          throw new Error(
+            "mediaFileId or mediaUrl is required for media messages.",
+          );
+        }
+
+        if (mediaUrl && typeof mediaUrl === "string") {
+          try {
+            new URL(mediaUrl);
+          } catch (error) {
+            throw new Error("mediaUrl must be a valid URL.");
+          }
+        }
+
+        if (mediaUrl && !effectiveMediaFileId) {
+          const downloadedFile = await downloadMediaUrl(mediaUrl);
+          const uploadedMedia = await chatService.createMediaFile(
+            req.user.id,
+            downloadedFile,
+          );
+          effectiveMediaFileId = uploadedMedia.id;
+          effectiveType = inferMessageType(downloadedFile);
+        }
+
         const result = await chatService.createOutgoingMessage({
           userId: req.user.id,
           chatId: req.params.chatId,
           body: req.body.body,
-          type: req.body.type || "text",
-          mediaFileId: req.body.mediaFileId || null,
+          type: effectiveType,
+          mediaFileId: effectiveMediaFileId,
           replyToId: req.body.replyToId || null,
         });
 
-        if (result.message.sessionId) {
-          await sessionManager.sendMessage(result.message.sessionId, {
-            recipient: result.message.receiver,
-            body: result.message.body,
-            mediaFileId: result.message.mediaFileId,
-            mediaPath: result.message.mediaFile?.relativePath || null,
-          });
-
-          await chatService.addMessageStatus(result.message.id, "delivered");
-          result.message.statuses = [
-            ...(result.message.statuses || []),
-            { status: "delivered", createdAt: new Date().toISOString() },
-          ];
-        }
+        await deliverOutgoingApiMessage({
+          userId: req.user.id,
+          result,
+          sessionManager,
+          io: req.app.get("io"),
+        });
 
         res.json(result);
       } catch (error) {

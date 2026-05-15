@@ -11,6 +11,7 @@ Default skills
 - `update_assistant` — Change assistant display name, avatar, or persona.
 - `create_api_key` — Generate an API key for the user.
 - `update_webhook` — Set incoming webhook URL and key.
+- `setup_gateway_integration` — Configure OpenWA as an API gateway for an external CRM/ERP/app by setting webhook URL/key, optionally creating an API key, and turning internal CRM automation off.
 - `update_tools_md` — Append or update human-readable entries in this file when new external tools are registered.
 - `setup_telegram_bot` — Set up a Telegram bot with a BotFather token so OpenWA can be remotely controlled via Telegram.
 - `configure_telegram_admins` — Save authorized Telegram chat IDs to restrict which Telegram users may control OpenWA.

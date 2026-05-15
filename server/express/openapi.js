@@ -853,6 +853,58 @@ function createOpenApiDocument(config) {
           },
         },
       },
+      "/api/outbound-deliveries": {
+        get: {
+          tags: ["Messages"],
+          summary: "List outbound delivery jobs",
+          description:
+            "List recent WhatsApp and Telegram delivery jobs. Failed jobs stopped after capped retry and can be retried manually.",
+          security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
+          parameters: [
+            {
+              name: "status",
+              in: "query",
+              schema: {
+                type: "string",
+                enum: ["queued", "sending", "delivered", "failed"],
+              },
+            },
+            {
+              name: "chatId",
+              in: "query",
+              schema: { type: "string" },
+            },
+            {
+              name: "limit",
+              in: "query",
+              schema: { type: "integer", minimum: 1, maximum: 100 },
+            },
+          ],
+          responses: {
+            200: { description: "Outbound delivery jobs" },
+          },
+        },
+      },
+      "/api/outbound-deliveries/{deliveryId}/retry": {
+        post: {
+          tags: ["Messages"],
+          summary: "Retry an outbound delivery job",
+          description:
+            "Reset attempts and retry a failed or queued outbound WhatsApp or Telegram delivery.",
+          security: [{ bearerAuth: [] }, { apiKeyAuth: [] }],
+          parameters: [
+            {
+              name: "deliveryId",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            200: { description: "Retried outbound delivery job" },
+          },
+        },
+      },
       "/api/messages/{messageId}": {
         delete: {
           tags: ["Messages"],
@@ -1046,16 +1098,19 @@ ${keyBlock}
 7. Send a message:
   - \`POST /api/chats/:chatId/messages/send\`
   - \`POST /api/messages/send\` — send directly by \`phoneNumber\`, including \`mediaUrl\` or \`mediaFileId\` for media messages
+8. Track outbound delivery:
+  - \`GET /api/outbound-deliveries\` — list recent outbound WhatsApp or Telegram delivery jobs
+  - \`POST /api/outbound-deliveries/:deliveryId/retry\` — reset and retry a failed outbound delivery
 
-> \`sessionId\` is required for all send requests.
+> \`sessionId\` is required when sending a new WhatsApp message by \`phoneNumber\`. Replies to an existing chat can use \`/api/chats/:chatId/messages/send\`; OpenWA uses the chat transport, including Telegram chats whose receiver starts with \`tg:\`.
+
+Outbound sends are queued durably and retried with backoff when WhatsApp or Telegram delivery fails. OpenWA stops after 5 attempts by default and marks the delivery job as \`failed\`; use the retry endpoint to try again manually.
 
 ### Example payloads
 
 Send a text message to an existing chat:
 \`\`\`json
 {
-  "sessionId": "<sessionId>",
-  "chatId": "<chatId>",
   "body": "Halo, ini follow up customer",
   "type": "text"
 }
@@ -1074,19 +1129,118 @@ Send a direct message by phone number:
 Media message by URL:
 \`\`\`json
 {
-  "sessionId": "<sessionId>",
-  "phoneNumber": "+6281234567890",
   "mediaUrl": "https://example.com/image.jpg",
+  "body": "Caption opsional",
   "type": "image"
 }
 \`\`\`
 
-8. Configure webhooks (optional)
-  - \`GET /api/webhook\` — read current webhook configuration
-  - \`POST /api/webhook\` — set webhook { "url": "https://...", "apiKey": "..." }
-  - \`DELETE /api/webhook\` — remove the webhook
+## Webhooks
 
-When an incoming message arrives the runtime will \`POST\` a JSON payload to your configured URL with header \`x-openwa-webhook-key\` set to the \`apiKey\` you provided. The payload contains \`chat\` and \`message\` objects described in the OpenAPI schemas.
+Use webhooks when an external CRM, ERP, helpdesk, or AI service should receive incoming customer messages and reply through the OpenWA API.
+
+Configure webhooks:
+
+- \`GET /api/webhook\` — read current webhook configuration.
+- \`POST /api/webhook\` — set webhook \`{ "url": "https://example.com/openwa-webhook", "apiKey": "shared-secret" }\`.
+- \`DELETE /api/webhook\` — remove the webhook.
+- \`GET /api/webhook/deliveries\` — list recent webhook delivery attempts.
+- \`POST /api/webhook/deliveries/:deliveryId/retry\` — replay a stored webhook payload.
+
+OpenWA sends this request to your endpoint:
+
+\`\`\`http
+POST <your-webhook-url>
+Content-Type: application/json
+x-openwa-webhook-key: <apiKey configured in OpenWA>
+\`\`\`
+
+When an incoming WhatsApp or non-admin Telegram customer message arrives the runtime will \`POST\` a JSON payload to your configured URL with header \`x-openwa-webhook-key\` set to the \`apiKey\` you provided. The payload contains \`chat\` and \`message\` objects described in the OpenAPI schemas. Store \`chat.id\` and reply through \`POST /api/chats/:chatId/messages/send\`.
+
+Webhook deliveries are logged per user. OpenWA retries transient delivery failures automatically, and failed deliveries can be replayed with the retry endpoint.
+
+Example payload:
+
+\`\`\`json
+{
+  "chat": {
+    "id": "chat_id_from_openwa",
+    "title": "Customer Name",
+    "sessionId": "whatsapp_session_id_or_null_for_telegram",
+    "contact": {
+      "externalId": "6281234567890@c.us or tg:123456789"
+    }
+  },
+  "message": {
+    "id": "message_id_from_openwa",
+    "chatId": "chat_id_from_openwa",
+    "sessionId": "whatsapp_session_id_or_null_for_telegram",
+    "sender": "6281234567890@c.us or tg:123456789",
+    "receiver": "your_whatsapp_or_telegram_target",
+    "body": "Customer message text",
+    "type": "text",
+    "direction": "inbound",
+    "mediaFile": null,
+    "statuses": []
+  }
+}
+\`\`\`
+
+Minimal Express receiver:
+
+\`\`\`js
+app.post("/openwa-webhook", express.json(), async (req, res) => {
+  if (req.get("x-openwa-webhook-key") !== process.env.OPENWA_WEBHOOK_KEY) {
+    return res.status(401).json({ ok: false });
+  }
+
+  const { chat, message } = req.body;
+  console.log("Incoming OpenWA message", {
+    chatId: chat.id,
+    from: message.sender,
+    text: message.body,
+  });
+
+  res.json({ ok: true });
+});
+\`\`\`
+
+Reply to the same WhatsApp or Telegram chat:
+
+\`\`\`bash
+curl -X POST ${config.frontendUrl}/api/chats/<chatId>/messages/send \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: <api-key>" \\
+  -d '{"body":"Reply from external CRM","type":"text"}'
+\`\`\`
+
+Send media to the same chat with a public URL:
+
+\`\`\`bash
+curl -X POST ${config.frontendUrl}/api/chats/<chatId>/messages/send \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: <api-key>" \\
+  -d '{"type":"image","mediaUrl":"https://example.com/photo.jpg","body":"Photo caption"}'
+\`\`\`
+
+Or upload media first:
+
+\`\`\`bash
+curl -X POST ${config.frontendUrl}/api/media \\
+  -H "X-API-Key: <api-key>" \\
+  -F "file=@./invoice.pdf"
+\`\`\`
+
+Then send:
+
+\`\`\`bash
+curl -X POST ${config.frontendUrl}/api/chats/<chatId>/messages/send \\
+  -H "Content-Type: application/json" \\
+  -H "X-API-Key: <api-key>" \\
+  -d '{"type":"document","mediaFileId":"<mediaFileId>","body":"Invoice"}'
+\`\`\`
+
+For API-only gateway mode, set internal CRM automation to **Off**. OpenWA will still store incoming messages, deliver webhooks, and allow the external app to reply through API endpoints.
 
 ## Important notes
 

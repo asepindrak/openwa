@@ -2,9 +2,9 @@ const chatService = require("./chat-service");
 const crmService = require("./crm-service");
 const knowledgeService = require("./knowledge-service");
 const llmService = require("./llm-service");
+const outboundDeliveryService = require("./outbound-delivery-service");
 
 const generationRetryDelaysMs = [0, 1000, 2500];
-const deliveryRetryDelaysMs = [0, 750, 1500];
 const autoReplyDebounceMs = 8000;
 const activeAutoReplyKeys = new Set();
 const pendingAutoReplyJobs = new Map();
@@ -82,58 +82,23 @@ function buildPrompt({ chat, messages, snippets, settings }) {
   ].join("\n");
 }
 
-async function deliverOutgoingMessage({ userId, outgoing, sessionManager }) {
-  const message = outgoing?.message;
-  if (!message) return false;
-
-  if (message.sessionId) {
-    if (!sessionManager) {
-      throw new Error("Session manager is required to send WhatsApp messages.");
-    }
-
-    await sessionManager.sendMessage(message.sessionId, {
-      recipient: message.receiver,
-      body: message.body,
-    });
-    return true;
-  }
-
-  if (String(message.receiver || "").startsWith("tg:")) {
-    const TelegramService = require("./telegram-service");
-    const telegramId = TelegramService.extractTelegramId(message.receiver);
-    if (!telegramId) return false;
-    return TelegramService.sendMessage(userId, telegramId, message.body || "");
-  }
-
-  return false;
-}
-
 async function deliverOutgoingMessageWithRetry({
   userId,
   outgoing,
   sessionManager,
+  io,
 }) {
-  return retryOperation(
-    () =>
-      deliverOutgoingMessage({
-        userId,
-        outgoing,
-        sessionManager,
-      }).then((sent) => {
-        if (!sent) {
-          throw new Error("No active transport was available for delivery.");
-        }
-        return sent;
-      }),
-    {
-      delaysMs: deliveryRetryDelaysMs,
-      onRetry: (error, attempt) => {
-        console.warn(
-          `[CrmAutoReply] Delivery attempt ${attempt} failed for message ${outgoing.message.id}: ${error.message}`,
-        );
-      },
-    },
-  );
+  const message = outgoing?.message;
+  if (!message) return false;
+
+  const deliveryJob = await outboundDeliveryService.enqueueMessage({
+    userId,
+    messageId: message.id,
+    sessionManager,
+    io,
+  });
+
+  return deliveryJob?.status === "delivered";
 }
 
 function formatWaitTime(seconds) {
@@ -196,15 +161,8 @@ async function createAndDeliverSystemNotice({
     userId,
     outgoing,
     sessionManager,
+    io,
   });
-
-  await chatService.addMessageStatus(outgoing.message.id, "delivered");
-  if (io && userRoom) {
-    io.to(userRoom(userId)).emit("message_status_update", {
-      messageId: outgoing.message.id,
-      status: "delivered",
-    });
-  }
 
   return outgoing;
 }
@@ -554,6 +512,7 @@ async function runAutoReply({
       userId,
       outgoing,
       sessionManager,
+      io,
     });
   } catch (error) {
     await crmService.createAutomationLog(userId, {
@@ -567,20 +526,16 @@ async function runAutoReply({
       sources: result.sources || [],
       metadata: {
         stage: "deliver",
-        retryAttempts: deliveryRetryDelaysMs.length,
+        retryAttempts: outboundDeliveryService.DEFAULT_MAX_ATTEMPTS,
       },
     });
     throw error;
   }
 
-  if (delivered) {
-    await chatService.addMessageStatus(outgoing.message.id, "delivered");
-    if (io && userRoom) {
-      io.to(userRoom(userId)).emit("message_status_update", {
-        messageId: outgoing.message.id,
-        status: "delivered",
-      });
-    }
+  if (!delivered) {
+    console.warn(
+      `[CrmAutoReply] Delivery queued for retry for message ${outgoing.message.id}`,
+    );
   }
 
   await crmService.createAutomationLog(userId, {

@@ -254,6 +254,7 @@ The assistant comes with these built-in skills:
 - **`update_assistant`** — Customize the assistant's display name, avatar, and personality.
 - **`create_api_key`** — Generate API keys for external integrations.
 - **`update_webhook`** — Configure incoming webhook URL and authentication key.
+- **`setup_gateway_integration`** — Configure OpenWA as an external app gateway from chat: set webhook URL/key, optionally create an API key, and turn internal CRM automation off.
 - **`update_tools_md`** — Register and document new external tools.
 - **`get_webpage`** — Fetch and parse webpage content (with fallback to browser rendering).
 - **`open_browser`** — Launch headless browser for dynamic content extraction.
@@ -405,10 +406,14 @@ Returns the initial workspace payload, including the current user, sessions, cha
 - `GET /api/chats/{chatId}/messages`
 - `POST /api/chats/{chatId}/messages/send`
 - `POST /api/messages/send`
+- `GET /api/outbound-deliveries`
+- `POST /api/outbound-deliveries/{deliveryId}/retry`
 - `DELETE /api/messages/{messageId}`
 - `POST /api/messages/{messageId}/forward`
 
-> Note: `sessionId` is required for all `send` requests (`/api/chats/{chatId}/messages/send` and `/api/messages/send`).
+> Note: `sessionId` is required when sending a new WhatsApp message by `phoneNumber`. Replies to an existing chat can use `/api/chats/{chatId}/messages/send`; OpenWA uses the chat transport, including Telegram chats whose receiver starts with `tg:`.
+
+Outbound sends are queued durably and retried with backoff when WhatsApp or Telegram delivery fails. OpenWA stops after 5 attempts by default and marks the delivery job as `failed`; use the retry endpoint to reset and try again manually.
 
 `GET /api/chats/{chatId}/messages` supports:
 
@@ -433,6 +438,8 @@ Upload a file first, then use the returned `mediaFileId` when calling the send m
 - `GET /api/crm/logs`
 
 CRM settings include automation mode, persona, fallback message, knowledge retrieval settings, abuse cooldown, and daily reply limits.
+
+To use OpenWA as a gateway/API only, set internal CRM automation mode to **Off**, configure an incoming webhook, and let the external app reply through `/api/chats/{chatId}/messages/send` or `/api/messages/send`.
 
 ### Knowledge
 
@@ -472,6 +479,113 @@ Authorization: Bearer <api-key>
 
 Recommended for agents, automation, and external integrations.
 
+## Webhooks
+
+OpenWA can forward incoming customer messages to an external application such as a CRM, ERP, helpdesk, or AI service with its own knowledge base.
+
+Configure the webhook from **Settings -> Webhooks** or with:
+
+- `GET /api/webhook` — read the current webhook.
+- `POST /api/webhook` — set `{ "url": "https://example.com/openwa-webhook", "apiKey": "shared-secret" }`.
+- `DELETE /api/webhook` — remove the webhook.
+- `GET /api/webhook/deliveries` — list recent webhook delivery attempts.
+- `POST /api/webhook/deliveries/{deliveryId}/retry` — replay a stored webhook payload.
+
+When a WhatsApp or non-admin Telegram customer message arrives, OpenWA sends:
+
+```http
+POST <your-webhook-url>
+Content-Type: application/json
+x-openwa-webhook-key: <apiKey configured in OpenWA>
+```
+
+Payload shape:
+
+```json
+{
+  "chat": {
+    "id": "chat_id_from_openwa",
+    "title": "Customer Name",
+    "sessionId": "whatsapp_session_id_or_null_for_telegram",
+    "contact": {
+      "externalId": "6281234567890@c.us or tg:123456789"
+    }
+  },
+  "message": {
+    "id": "message_id_from_openwa",
+    "chatId": "chat_id_from_openwa",
+    "sessionId": "whatsapp_session_id_or_null_for_telegram",
+    "sender": "6281234567890@c.us or tg:123456789",
+    "receiver": "your_whatsapp_or_telegram_target",
+    "body": "Customer message text",
+    "type": "text",
+    "direction": "inbound",
+    "mediaFile": null,
+    "statuses": []
+  }
+}
+```
+
+The external app should verify `x-openwa-webhook-key`, store `chat.id`, and reply through the API.
+
+Webhook deliveries are logged per user. OpenWA retries transient delivery failures automatically, and failed deliveries can be replayed with the retry endpoint.
+
+Minimal Express receiver:
+
+```js
+app.post("/openwa-webhook", express.json(), async (req, res) => {
+  if (req.get("x-openwa-webhook-key") !== process.env.OPENWA_WEBHOOK_KEY) {
+    return res.status(401).json({ ok: false });
+  }
+
+  const { chat, message } = req.body;
+  console.log("Incoming OpenWA message", {
+    chatId: chat.id,
+    from: message.sender,
+    text: message.body,
+  });
+
+  res.json({ ok: true });
+});
+```
+
+Reply to the same chat:
+
+```bash
+curl -X POST http://localhost:55111/api/chats/<chatId>/messages/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <api-key>" \
+  -d '{"body":"Reply from external CRM","type":"text"}'
+```
+
+Send media to the same chat with a public URL:
+
+```bash
+curl -X POST http://localhost:55111/api/chats/<chatId>/messages/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <api-key>" \
+  -d '{"type":"image","mediaUrl":"https://example.com/photo.jpg","body":"Photo caption"}'
+```
+
+Or upload media first:
+
+```bash
+curl -X POST http://localhost:55111/api/media \
+  -H "X-API-Key: <api-key>" \
+  -F "file=@./invoice.pdf"
+```
+
+Then send:
+
+```bash
+curl -X POST http://localhost:55111/api/chats/<chatId>/messages/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: <api-key>" \
+  -d '{"type":"document","mediaFileId":"<mediaFileId>","body":"Invoice"}'
+```
+
+For API-only gateway mode, set internal CRM automation to **Off**. OpenWA will still store incoming messages, deliver webhooks, and allow the external app to reply through API endpoints. Non-admin Telegram users do not receive assistant tool access.
+
 ## Agent and Tool APIs
 
 ### Tool Management
@@ -510,8 +624,12 @@ Send a text message to an existing chat:
 curl -X POST http://localhost:55111/api/chats/<chatId>/messages/send \
   -H "Content-Type: application/json" \
   -H "X-API-Key: <api-key>" \
-  -d '{"sessionId":"<sessionId>","body":"Hello from OpenWA","type":"text"}'
+  -d '{"body":"Hello from OpenWA","type":"text"}'
 ```
+
+Use this same endpoint to reply to a Telegram customer chat received from a webhook.
+
+For media replies, either upload first with `/api/media` and pass `mediaFileId`, or pass a public `mediaUrl` with type `image`, `video`, `audio`, `document`, or `sticker`.
 
 Send a direct message by phone number:
 

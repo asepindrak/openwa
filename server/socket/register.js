@@ -1,5 +1,6 @@
 const { getUserFromToken } = require("../services/auth-service");
 const chatService = require("../services/chat-service");
+const outboundDeliveryService = require("../services/outbound-delivery-service");
 
 function userRoom(userId) {
   return `user:${userId}`;
@@ -12,25 +13,6 @@ function isAssistantExternalId(externalId) {
       String(externalId).startsWith("openwa:assistant") ||
       String(externalId).endsWith(":assistant"))
   );
-}
-
-async function deliverTelegramMessage(userId, message) {
-  if (!String(message?.receiver || "").startsWith("tg:")) return false;
-
-  const TelegramService = require("../services/telegram-service");
-  const telegramId = TelegramService.extractTelegramId(message.receiver);
-  if (!telegramId) return false;
-
-  if (message.mediaFileId) {
-    return TelegramService.sendMedia(
-      userId,
-      telegramId,
-      message.mediaFile,
-      message.body,
-    );
-  }
-
-  return TelegramService.sendMessage(userId, telegramId, message.body || "");
 }
 
 function registerSocketHandlers({ io, config, sessionManager }) {
@@ -106,32 +88,19 @@ function registerSocketHandlers({ io, config, sessionManager }) {
             result.chat,
           );
 
-          let delivered = false;
-          if (result.message.sessionId) {
-            await sessionManager.sendMessage(result.message.sessionId, {
-              recipient: result.message.receiver,
-              body: result.message.body,
-              mediaFileId: result.message.mediaFileId,
-              mediaPath: result.message.mediaFile?.relativePath || null,
-            });
-            delivered = true;
-          } else {
-            delivered = await deliverTelegramMessage(
-              socket.user.id,
-              result.message,
-            );
-          }
-
-          if (delivered) {
-            await chatService.addMessageStatus(result.message.id, "delivered");
-            io.to(userRoom(socket.user.id)).emit("message_status_update", {
-              messageId: result.message.id,
-              status: "delivered",
-            });
-          }
+          const deliveryJob = await outboundDeliveryService.enqueueMessage({
+            userId: socket.user.id,
+            messageId: result.message.id,
+            sessionManager,
+            io,
+          });
 
           if (ack) {
-            ack({ ok: true, message: result.message });
+            ack({
+              ok: true,
+              message: result.message,
+              deliveryJob: outboundDeliveryService.serializeJob(deliveryJob),
+            });
           }
         }
       } catch (error) {
@@ -183,32 +152,19 @@ function registerSocketHandlers({ io, config, sessionManager }) {
           result.chat,
         );
 
-        let delivered = false;
-        if (result.message.sessionId) {
-          await sessionManager.sendMessage(result.message.sessionId, {
-            recipient: result.message.receiver,
-            body: result.message.body,
-            mediaFileId: result.message.mediaFileId,
-            mediaPath: result.message.mediaFile?.relativePath || null,
-          });
-          delivered = true;
-        } else {
-          delivered = await deliverTelegramMessage(
-            socket.user.id,
-            result.message,
-          );
-        }
-
-        if (delivered) {
-          await chatService.addMessageStatus(result.message.id, "delivered");
-          io.to(userRoom(socket.user.id)).emit("message_status_update", {
-            messageId: result.message.id,
-            status: "delivered",
-          });
-        }
+        const deliveryJob = await outboundDeliveryService.enqueueMessage({
+          userId: socket.user.id,
+          messageId: result.message.id,
+          sessionManager,
+          io,
+        });
 
         if (ack) {
-          ack({ ok: true, message: result.message });
+          ack({
+            ok: true,
+            message: result.message,
+            deliveryJob: outboundDeliveryService.serializeJob(deliveryJob),
+          });
         }
       } catch (error) {
         if (ack) {

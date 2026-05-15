@@ -18,6 +18,7 @@ const apiKeyService = require("./api-key-service");
 const authService = require("./auth-service");
 const webhookService = require("./webhook-service");
 const sessionService = require("./session-service");
+const crmService = require("./crm-service");
 const terminalService = require("./terminal-service");
 const orchestrator = require("./agent-orchestrator");
 const toolExecutor = require("./tool-executor");
@@ -105,6 +106,7 @@ Default skills:
 - update_assistant: change assistant display name, avatar, or persona.
 - create_api_key: generate an API key for the user.
 - update_webhook: set incoming webhook URL and key.
+- setup_gateway_integration: configure OpenWA as an API gateway for an external CRM/ERP/app by setting webhook URL/key, optionally creating an API key, and turning internal CRM automation off.
 - setup_telegram_bot: set up a Telegram bot to remote OpenWA. User must provide a bot token from @BotFather.
 - update_tools_md: update this file with new tools/skills provided by user.
 
@@ -755,6 +757,9 @@ function buildAssistantSystemPrompt({
   parts.push(
     "8. Telegram Setup: Ask the user to create a bot with BotFather and paste the bot token. Use `setup_telegram_bot` with the token to start the bot. If they want access restricted, configure admin Telegram IDs later with `configure_telegram_admins`.",
   );
+  parts.push(
+    "9. API Gateway Setup: If the user wants OpenWA to integrate with an external CRM, ERP, helpdesk, or app as a messaging gateway, ask for the external webhook URL and shared webhook secret if missing. Use `setup_gateway_integration` to set the webhook, create an API key for the external app, and turn internal CRM automation off. Tell the user the returned API key secret is shown only once and must be saved in the external app.",
+  );
   parts.push("");
   parts.push(`Available tools: ${toolsList}.`);
   parts.push("");
@@ -1273,6 +1278,58 @@ const tools = {
     if (!url) throw new Error("url is required");
     const cfg = webhookService.setWebhook(userId, { url, apiKey });
     return { ok: true, webhook: cfg };
+  },
+  setup_gateway_integration: async (userId, args = {}) => {
+    const url = String(args.url || args.webhookUrl || "").trim();
+    if (!url) throw new Error("webhook url is required.");
+
+    try {
+      new URL(url);
+    } catch (error) {
+      throw new Error("webhook url must be a valid URL.");
+    }
+
+    const webhookKey = String(
+      args.apiKey || args.webhookApiKey || args.webhookKey || args.secret || "",
+    ).trim();
+    const externalAppName = String(
+      args.name || args.appName || args.externalAppName || "External Gateway",
+    ).trim();
+    const createApiKey = args.createApiKey !== false;
+    const disableInternalCrm = args.disableInternalCrm !== false;
+
+    const webhook = webhookService.setWebhook(userId, {
+      url,
+      apiKey: webhookKey,
+    });
+
+    let crmSettings = null;
+    if (disableInternalCrm) {
+      crmSettings = await crmService.updateSettings(userId, {
+        defaultMode: "off",
+      });
+    }
+
+    let apiKey = null;
+    if (createApiKey) {
+      const result = await apiKeyService.createApiKey(userId, {
+        name: `${externalAppName} API Gateway`,
+      });
+      apiKey = result;
+    }
+
+    return {
+      ok: true,
+      webhook,
+      apiKey,
+      crmDefaultMode: crmSettings?.defaultMode || null,
+      docs: {
+        readme: "/docs/readme#webhooks",
+        openapi: "/docs/json",
+      },
+      message:
+        "OpenWA gateway integration is configured. Save the API key secret in the external app; it is shown only once. The external app should verify x-openwa-webhook-key, store chat.id, and reply through POST /api/chats/{chatId}/messages/send.",
+    };
   },
   run_terminal: async (userId, args, ctx) => {
     const {

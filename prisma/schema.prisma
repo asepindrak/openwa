@@ -41,26 +41,28 @@ enum MessageDirection {
 }
 
 model User {
-  id                 String                @id @default(cuid())
-  name               String
-  email              String                @unique
-  passwordHash       String
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
-  contacts           Contact[]
-  chats              Chat[]
-  sessions           WhatsappSession[]
-  mediaFiles         MediaFile[]
-  apiKeys            ApiKey[]
-  aiProviders        AiProvider[]
-  terminalCommands   TerminalCommand[]
-  userSetting        UserSetting?
-  crmAiSetting       CrmAiSetting?
-  crmSessionSettings CrmSessionAiSetting[]
-  crmChatSettings    CrmChatAiSetting[]
-  crmAutomationLogs  CrmAutomationLog[]
-  knowledgeDocuments KnowledgeDocument[]
-  knowledgeChunks    KnowledgeChunk[]
+  id                   String                @id @default(cuid())
+  name                 String
+  email                String                @unique
+  passwordHash         String
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  contacts             Contact[]
+  chats                Chat[]
+  sessions             WhatsappSession[]
+  mediaFiles           MediaFile[]
+  apiKeys              ApiKey[]
+  aiProviders          AiProvider[]
+  terminalCommands     TerminalCommand[]
+  userSetting          UserSetting?
+  crmAiSetting         CrmAiSetting?
+  crmSessionSettings   CrmSessionAiSetting[]
+  crmChatSettings      CrmChatAiSetting[]
+  crmAutomationLogs    CrmAutomationLog[]
+  knowledgeDocuments   KnowledgeDocument[]
+  knowledgeChunks      KnowledgeChunk[]
+  webhookDeliveryLogs  WebhookDeliveryLog[]
+  outboundDeliveryJobs OutboundDeliveryJob[]
 
   @@map("users")
 }
@@ -124,20 +126,21 @@ model Contact {
 }
 
 model Chat {
-  id                String             @id @default(cuid())
-  userId            String
-  sessionId         String?
-  contactId         String
-  title             String
-  pinnedAt          DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  session           WhatsappSession?   @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-  contact           Contact            @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  messages          Message[]
-  crmAiSetting      CrmChatAiSetting?
-  crmAutomationLogs CrmAutomationLog[]
+  id                  String               @id @default(cuid())
+  userId              String
+  sessionId           String?
+  contactId           String
+  title               String
+  pinnedAt            DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session             WhatsappSession?     @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  contact             Contact              @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages            Message[]
+  crmAiSetting        CrmChatAiSetting?
+  crmAutomationLogs   CrmAutomationLog[]
+  webhookDeliveryLogs WebhookDeliveryLog[]
 
   @@unique([userId, contactId])
   @@index([userId, updatedAt])
@@ -161,25 +164,27 @@ model MediaFile {
 }
 
 model Message {
-  id                String           @id @default(cuid())
-  chatId            String
-  sessionId         String?
-  mediaFileId       String?
-  replyToId         String?
-  externalMessageId String?
-  sender            String
-  receiver          String
-  body              String?
-  type              MessageType      @default(text)
-  direction         MessageDirection
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-  chat              Chat             @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  session           WhatsappSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
-  mediaFile         MediaFile?       @relation(fields: [mediaFileId], references: [id], onDelete: SetNull)
-  replyTo           Message?         @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
-  replies           Message[]        @relation("MessageReplies")
-  statuses          MessageStatus[]
+  id                  String               @id @default(cuid())
+  chatId              String
+  sessionId           String?
+  mediaFileId         String?
+  replyToId           String?
+  externalMessageId   String?
+  sender              String
+  receiver            String
+  body                String?
+  type                MessageType          @default(text)
+  direction           MessageDirection
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  chat                Chat                 @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  session             WhatsappSession?     @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  mediaFile           MediaFile?           @relation(fields: [mediaFileId], references: [id], onDelete: SetNull)
+  replyTo             Message?             @relation("MessageReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies             Message[]            @relation("MessageReplies")
+  statuses            MessageStatus[]
+  webhookDeliveryLogs WebhookDeliveryLog[]
+  outboundDeliveryJob OutboundDeliveryJob?
 
   @@index([chatId, createdAt])
   @@map("messages")
@@ -194,6 +199,27 @@ model MessageStatus {
 
   @@index([messageId, createdAt])
   @@map("message_status")
+}
+
+model OutboundDeliveryJob {
+  id            String    @id @default(cuid())
+  userId        String
+  messageId     String    @unique
+  transport     String
+  status        String    @default("queued")
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  nextAttemptAt DateTime  @default(now())
+  lastError     String?
+  deliveredAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message       Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, nextAttemptAt])
+  @@index([status, nextAttemptAt])
+  @@map("outbound_delivery_jobs")
 }
 
 model AiProvider {
@@ -328,6 +354,31 @@ model CrmAutomationLog {
   @@index([userId, chatId, createdAt])
   @@index([userId, action, createdAt])
   @@map("crm_automation_logs")
+}
+
+model WebhookDeliveryLog {
+  id             String    @id @default(cuid())
+  userId         String
+  chatId         String?
+  messageId      String?
+  url            String
+  status         String    @default("pending")
+  attempts       Int       @default(0)
+  payload        Json
+  responseStatus Int?
+  responseBody   String?
+  error          String?
+  deliveredAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chat    Chat?    @relation(fields: [chatId], references: [id], onDelete: SetNull)
+  message Message? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, createdAt])
+  @@index([userId, chatId, createdAt])
+  @@map("webhook_delivery_logs")
 }
 
 model KnowledgeDocument {

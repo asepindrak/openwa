@@ -9,6 +9,7 @@ const { initializeDatabase } = require("./database/init");
 const { createApp } = require("./express/create-app");
 const chatService = require("./services/chat-service");
 const crmAutoReplyService = require("./services/crm-auto-reply-service");
+const outboundDeliveryService = require("./services/outbound-delivery-service");
 const sessionService = require("./services/session-service");
 const { registerSocketHandlers, userRoom } = require("./socket/register");
 const { ensureRuntimeDirs, webDir } = require("./utils/paths");
@@ -164,6 +165,7 @@ async function startOpenWA({ dev = false } = {}) {
 
   // make io available to express routes via req.app.get('io')
   app.set("io", io);
+  outboundDeliveryService.startWorker({ sessionManager, io });
 
   sessionManager.on("session-status", (payload) => {
     io.to(userRoom(payload.userId)).emit("session_status_update", payload);
@@ -250,6 +252,7 @@ async function startOpenWA({ dev = false } = {}) {
   const shutdown = async () => {
     console.log("\n[OpenWA] Shutting down gracefully...");
     try {
+      outboundDeliveryService.stopWorker();
       await TelegramService.stopAll();
     } catch (e) {}
     process.exit(0);

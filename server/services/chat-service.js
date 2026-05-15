@@ -629,6 +629,21 @@ async function createOutgoingMessage({
     }
   }
 
+  if (mediaFileId) {
+    const mediaFile = await retryOnSqliteTimeout(() =>
+      prisma.mediaFile.findFirst({
+        where: {
+          id: mediaFileId,
+          userId,
+        },
+      }),
+    );
+
+    if (!mediaFile) {
+      throw new Error("Media file not found.");
+    }
+  }
+
   const message = await retryOnSqliteTimeout(async () => {
     return prisma.message.create({
       data: {

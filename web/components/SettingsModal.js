@@ -117,40 +117,71 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
-const webhookReceiverExample = `app.post("/openwa-webhook", express.json(), (req, res) => {
+const webhookReceiverExample = `app.post("/openwa-webhook", express.json(), async (req, res) => {
   const key = req.get("x-openwa-webhook-key");
   if (key !== process.env.OPENWA_WEBHOOK_KEY) {
     return res.status(401).json({ ok: false });
   }
 
   const { chat, message } = req.body;
-  console.log("Incoming WhatsApp message", {
+  const isTelegram = String(chat.contact?.externalId || "").startsWith("tg:");
+  const hasMedia = Boolean(message.mediaFile);
+
+  console.log("Incoming OpenWA message", {
     chatId: chat.id,
+    channel: isTelegram ? "telegram" : "whatsapp",
     from: message.sender,
     text: message.body,
+    type: message.type,
+    media: hasMedia
+      ? {
+          id: message.mediaFile.id,
+          mimeType: message.mediaFile.mimeType,
+          originalName: message.mediaFile.originalName,
+          size: message.mediaFile.size,
+        }
+      : null,
   });
+
+  // Reply later with:
+  // POST /api/chats/{chat.id}/messages/send
+  // { "body": "Reply from external app", "type": "text" }
 
   res.json({ ok: true });
 });`;
 
 const webhookPayloadExample = `{
   "chat": {
-    "id": "6281234567890@c.us",
+    "id": "chat_123",
     "title": "Customer Name",
     "sessionId": "session_123",
-    "updatedAt": "2026-05-13T08:30:00.000Z"
+    "transportType": "whatsapp",
+    "contact": {
+      "externalId": "6281234567890@c.us",
+      "displayName": "Customer Name"
+    },
+    "updatedAt": "2026-05-15T08:30:00.000Z"
   },
   "message": {
     "id": "msg_123",
-    "chatId": "6281234567890@c.us",
+    "chatId": "chat_123",
     "sessionId": "session_123",
     "sender": "6281234567890@c.us",
     "receiver": "6289876543210@c.us",
-    "body": "Halo, saya mau tanya produk",
-    "type": "chat",
-    "direction": "incoming",
-    "createdAt": "2026-05-13T08:30:00.000Z",
-    "mediaFile": null,
+    "body": "Ini foto area yang mau dibersihkan",
+    "type": "image",
+    "direction": "inbound",
+    "createdAt": "2026-05-15T08:30:00.000Z",
+    "mediaFileId": "media_123",
+    "mediaFile": {
+      "id": "media_123",
+      "fileName": "photo.jpg",
+      "originalName": "photo.jpg",
+      "mimeType": "image/jpeg",
+      "size": 248120,
+      "relativePath": "media/photo.jpg",
+      "createdAt": "2026-05-15T08:30:00.000Z"
+    },
     "statuses": []
   }
 }`;
@@ -221,6 +252,11 @@ export function SettingsModal({
   const [telegramAdminIds, setTelegramAdminIds] = useState("");
   const [telegramConfigLoading, setTelegramConfigLoading] = useState(false);
   const [telegramConfigSaving, setTelegramConfigSaving] = useState(false);
+  const [webhookDeliveries, setWebhookDeliveries] = useState([]);
+  const [webhookDeliveriesLoading, setWebhookDeliveriesLoading] =
+    useState(false);
+  const [retryingWebhookDeliveryId, setRetryingWebhookDeliveryId] =
+    useState(null);
   const [resetPasswordValue, setResetPasswordValue] = useState("");
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
   const [resetAllLoading, setResetAllLoading] = useState(false);
@@ -243,6 +279,27 @@ export function SettingsModal({
   const activeSession = sessions.find(
     (session) => session.id === activeSessionId,
   );
+  const activeOrigin =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : getApiBaseUrl().replace(/\/+$/, "");
+  const gatewayAgentInstruction = `Integrate this application with OpenWA as a messaging gateway.
+
+OpenWA base URL:
+${activeOrigin}
+
+Read these docs first:
+- ${activeOrigin}/docs/readme#webhooks
+- ${activeOrigin}/docs/json
+
+Use X-API-Key for authentication.
+Configure an OpenWA webhook so this application receives incoming customer messages.
+Verify the x-openwa-webhook-key header on every webhook request.
+Store chat.id from the webhook payload.
+Reply to the customer with POST ${activeOrigin}/api/chats/{chatId}/messages/send.
+For media replies, either pass a public mediaUrl or upload to POST ${activeOrigin}/api/media and then send the returned mediaFileId.
+Do not use OpenWA internal CRM automation for this integration; set OpenWA CRM automation to Off.
+Treat WhatsApp and non-admin Telegram customer messages the same way: receive them from the webhook and reply through the OpenWA API.`;
 
   function providerHint(key) {
     if (!key) return "";
@@ -280,6 +337,43 @@ export function SettingsModal({
     await navigator.clipboard.writeText(value);
     setCopiedWebhookExample(kind);
     setTimeout(() => setCopiedWebhookExample(null), 1500);
+  }
+
+  async function copyGatewayAgentInstruction() {
+    await navigator.clipboard.writeText(gatewayAgentInstruction);
+    setCopiedWebhookExample("gateway-agent");
+    setTimeout(() => setCopiedWebhookExample(null), 1500);
+  }
+
+  async function loadWebhookDeliveries() {
+    if (!token) return;
+    setWebhookDeliveriesLoading(true);
+    try {
+      const data = await apiFetch("/api/webhook/deliveries?limit=10", {
+        token,
+      });
+      setWebhookDeliveries(data.deliveries || []);
+    } catch (error) {
+      setWebhookDeliveries([]);
+    } finally {
+      setWebhookDeliveriesLoading(false);
+    }
+  }
+
+  async function retryWebhookDelivery(deliveryId) {
+    if (!token || !deliveryId) return;
+    setRetryingWebhookDeliveryId(deliveryId);
+    try {
+      await apiFetch(`/api/webhook/deliveries/${deliveryId}/retry`, {
+        method: "POST",
+        token,
+      });
+      await loadWebhookDeliveries();
+    } catch (error) {
+      alert(error.message || "Failed to retry webhook delivery");
+    } finally {
+      setRetryingWebhookDeliveryId(null);
+    }
   }
 
   useEffect(() => {
@@ -345,6 +439,11 @@ export function SettingsModal({
       mounted = false;
     };
   }, [open, token]);
+
+  useEffect(() => {
+    if (!open || activeTab !== "webhooks" || !token) return;
+    loadWebhookDeliveries();
+  }, [open, activeTab, token]);
 
   const handleSaveTelegramConfig = async (e) => {
     e.preventDefault();
@@ -943,6 +1042,32 @@ export function SettingsModal({
                     </div>
                   </div>
 
+                  <div className="mt-4 rounded-[22px] bg-[#2e2f2f] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-sm font-semibold text-white">
+                          AI agent gateway prompt
+                        </h4>
+                        <p className="mt-1 text-xs leading-5 text-white/45">
+                          Copy this into an external AI agent so it can connect
+                          to OpenWA as a WhatsApp and Telegram gateway.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/75 transition hover:bg-white/10"
+                        onClick={copyGatewayAgentInstruction}
+                      >
+                        {copiedWebhookExample === "gateway-agent"
+                          ? "Copied"
+                          : "Copy prompt"}
+                      </button>
+                    </div>
+                    <pre className="mt-3 max-h-56 overflow-auto rounded-[18px] bg-[#0f1010] p-4 text-xs leading-5 text-white/70">
+                      <code>{gatewayAgentInstruction}</code>
+                    </pre>
+                  </div>
+
                   {apiKeySecret ? (
                     <div className="mt-4 rounded-[22px] bg-[#2e2f2f] p-4">
                       <p className="text-[11px] uppercase tracking-[0.22em] text-brand-200/80">
@@ -1050,6 +1175,32 @@ export function SettingsModal({
                     the value you provide.
                   </p>
 
+                  <div className="mt-4 rounded-[22px] bg-[#2e2f2f] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-sm font-semibold text-white">
+                          AI agent gateway prompt
+                        </h4>
+                        <p className="mt-1 text-xs leading-5 text-white/45">
+                          Paste this into the external app agent that will
+                          receive webhooks and send replies through OpenWA.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/75 transition hover:bg-white/10"
+                        onClick={copyGatewayAgentInstruction}
+                      >
+                        {copiedWebhookExample === "gateway-agent"
+                          ? "Copied"
+                          : "Copy prompt"}
+                      </button>
+                    </div>
+                    <pre className="mt-3 max-h-56 overflow-auto rounded-[18px] bg-[#0f1010] p-4 text-xs leading-5 text-white/70">
+                      <code>{gatewayAgentInstruction}</code>
+                    </pre>
+                  </div>
+
                   <form
                     className="mt-4 space-y-3"
                     onSubmit={(e) => {
@@ -1140,15 +1291,86 @@ export function SettingsModal({
                         </button>
                       </div>
                       <p className="mt-1 text-xs leading-5 text-white/45">
-                        OpenWA sends this payload as JSON with header{" "}
+                        OpenWA sends text and supported media messages as JSON
+                        with header{" "}
                         <span className="font-mono">
                           x-openwa-webhook-key
                         </span>
-                        .
+                        . Media messages include{" "}
+                        <span className="font-mono">message.mediaFile</span>.
                       </p>
                       <pre className="mt-3 max-h-72 overflow-auto rounded-[18px] bg-[#0f1010] p-4 text-xs leading-5 text-white/70">
                         <code>{webhookPayloadExample}</code>
                       </pre>
+                    </div>
+
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h4 className="text-sm font-semibold text-white">
+                          Delivery logs
+                        </h4>
+                        <button
+                          type="button"
+                          className="rounded-full bg-white/5 px-3 py-1.5 text-xs font-medium text-white/75 transition hover:bg-white/10"
+                          onClick={loadWebhookDeliveries}
+                          disabled={webhookDeliveriesLoading}
+                        >
+                          {webhookDeliveriesLoading ? "Loading" : "Refresh"}
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-white/45">
+                        Recent webhook attempts are stored per user. Failed
+                        deliveries can be retried from here.
+                      </p>
+
+                      <div className="mt-3 space-y-2">
+                        {webhookDeliveries.map((delivery) => (
+                          <div
+                            key={delivery.id}
+                            className="rounded-[18px] bg-[#2e2f2f] p-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-xs font-semibold text-white">
+                                  {delivery.status} - {delivery.attempts} attempt
+                                  {delivery.attempts === 1 ? "" : "s"}
+                                </p>
+                                <p className="mt-1 truncate text-[11px] text-white/40">
+                                  {delivery.messageId || delivery.chatId}
+                                </p>
+                              </div>
+                              {delivery.status === "failed" ? (
+                                <button
+                                  type="button"
+                                  className="rounded-full bg-brand-500 px-3 py-1.5 text-xs font-semibold text-[#10251a]"
+                                  onClick={() =>
+                                    retryWebhookDelivery(delivery.id)
+                                  }
+                                  disabled={
+                                    retryingWebhookDeliveryId === delivery.id
+                                  }
+                                >
+                                  {retryingWebhookDeliveryId === delivery.id
+                                    ? "Retrying"
+                                    : "Retry"}
+                                </button>
+                              ) : null}
+                            </div>
+                            {delivery.error ? (
+                              <p className="mt-2 text-[11px] leading-5 text-red-200/80">
+                                {delivery.error}
+                              </p>
+                            ) : null}
+                          </div>
+                        ))}
+
+                        {!webhookDeliveries.length &&
+                        !webhookDeliveriesLoading ? (
+                          <div className="rounded-[18px] bg-[#2e2f2f] p-4 text-xs text-white/45">
+                            No webhook delivery attempts yet.
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 </div>
