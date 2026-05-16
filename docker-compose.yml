@@ -21,15 +21,9 @@ services:
       OPENWA_USE_WWEBJS: "${OPENWA_USE_WWEBJS}"
       OPENWA_ALLOW_MOCK: "${OPENWA_ALLOW_MOCK}"
       DATABASE_URL: "${DATABASE_URL}"
-    networks:
-      - dokploy-network
     volumes:
       - openwa-storage:/app/storage
     restart: unless-stopped
-
-networks:
-  dokploy-network:
-    external: true
 
 volumes:
   openwa-storage:
