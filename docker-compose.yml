@@ -6,6 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: openwa:latest
+    container_name: openwa
     env_file:
       - .env
     ports:
