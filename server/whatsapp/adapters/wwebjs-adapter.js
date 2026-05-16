@@ -1,6 +1,7 @@
 const EventEmitter = require("events");
 const QRCode = require("qrcode");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const { v4: uuidv4 } = require("uuid");
@@ -28,6 +29,62 @@ function resolveStoredMediaPath(relativePath) {
     : normalized;
 
   return path.join(mediaDir, withoutMediaPrefix);
+}
+
+function isChromiumProfileLockError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return (
+    message.includes("profile appears to be in use") ||
+    message.includes("process_singleton") ||
+    message.includes("singletonlock")
+  );
+}
+
+function isLiveLocalSingletonLock(lockPath) {
+  try {
+    const target = fs.readlinkSync(lockPath);
+    const match = String(target || "").match(/^(.+)-(\d+)$/);
+    if (!match) return false;
+
+    const [, host, pidValue] = match;
+    if (host !== os.hostname()) return false;
+
+    const pid = Number(pidValue);
+    if (!Number.isInteger(pid) || pid <= 0) return false;
+
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  } catch (error) {
+    return false;
+  }
+}
+
+function clearStaleChromiumProfileLocks(sessionId) {
+  const profileDir = path.join(sessionsDir, `session-${sessionId}`);
+  if (!fs.existsSync(profileDir)) {
+    return [];
+  }
+
+  const removed = [];
+  for (const fileName of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
+    const filePath = path.join(profileDir, fileName);
+    if (!fs.existsSync(filePath)) continue;
+
+    if (fileName === "SingletonLock" && isLiveLocalSingletonLock(filePath)) {
+      throw new Error(
+        `Chromium profile is locked by a running local process. Stop that process before reconnecting: ${filePath}`,
+      );
+    }
+
+    fs.rmSync(filePath, { force: true, recursive: true });
+    removed.push(filePath);
+  }
+
+  return removed;
 }
 
 class WwebjsAdapter extends EventEmitter {
@@ -89,7 +146,7 @@ class WwebjsAdapter extends EventEmitter {
     return result.url;
   }
 
-  async connect() {
+  async connect({ skipProfileLockRetry = false } = {}) {
     try {
       ensureRuntimeDirs();
     } catch (e) {}
@@ -225,7 +282,28 @@ class WwebjsAdapter extends EventEmitter {
       });
     });
 
-    await this.client.initialize();
+    try {
+      await this.client.initialize();
+    } catch (error) {
+      if (skipProfileLockRetry || !isChromiumProfileLockError(error)) {
+        throw error;
+      }
+
+      const removedLocks = clearStaleChromiumProfileLocks(this.session.id);
+      if (removedLocks.length) {
+        console.warn(
+          `[WwebjsAdapter] Removed stale Chromium profile locks for session ${this.session.id}: ${removedLocks.join(", ")}`,
+        );
+      }
+
+      try {
+        await this.client.destroy();
+      } catch (destroyError) {
+        // Browser launch failed before a clean client existed.
+      }
+      this.client = null;
+      await this.connect({ skipProfileLockRetry: true });
+    }
   }
 
   async disconnect() {

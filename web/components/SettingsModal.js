@@ -89,6 +89,31 @@ function SessionStatusBadge({ status }) {
   );
 }
 
+function hasExistingWhatsAppAuth(session) {
+  return Boolean(
+    session?.status === "ready" ||
+      session?.phoneNumber ||
+      session?.lastSeenAt ||
+      session?.lastConnectedAt,
+  );
+}
+
+function getConnectButtonLabel(session, loading) {
+  if (loading) {
+    return hasExistingWhatsAppAuth(session) ? "Reconnecting..." : "Connecting...";
+  }
+
+  return hasExistingWhatsAppAuth(session) ? "Reconnect" : "Connect";
+}
+
+function getConnectButtonClassName(session) {
+  if (hasExistingWhatsAppAuth(session)) {
+    return "rounded-2xl bg-sky-500/15 px-4 py-2 text-sm font-semibold text-sky-100 ring-1 ring-sky-400/25 transition hover:bg-sky-500/25 disabled:opacity-60";
+  }
+
+  return "rounded-2xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a] transition hover:bg-brand-600 disabled:opacity-60";
+}
+
 function initials(label) {
   return String(label || "?")
     .split(" ")
@@ -944,7 +969,7 @@ Treat WhatsApp and non-admin Telegram customer messages the same way: receive th
                       <div className="mt-4 flex gap-2 flex-wrap">
                         <button
                           type="button"
-                          className="rounded-2xl bg-brand-500 px-4 py-2 text-sm font-semibold text-[#10251a] disabled:opacity-60"
+                          className={getConnectButtonClassName(session)}
                           disabled={
                             !!connectLoading && connectLoading === session.id
                           }
@@ -953,9 +978,10 @@ Treat WhatsApp and non-admin Telegram customer messages the same way: receive th
                             onConnect(session.id);
                           }}
                         >
-                          {connectLoading === session.id
-                            ? "Connecting..."
-                            : "Connect"}
+                          {getConnectButtonLabel(
+                            session,
+                            connectLoading === session.id,
+                          )}
                         </button>
 
                         <button
