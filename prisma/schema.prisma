@@ -294,7 +294,10 @@ model CrmAiSetting {
   similarityThreshold         Float    @default(0.72)
   maxChunks                   Int      @default(6)
   cooldownSeconds             Int      @default(180)
+  adminPauseSeconds           Int      @default(1800)
   maxAutoRepliesPerChatPerDay Int      @default(20)
+  assistantName               String   @default("OpenWA CRM Assistant")
+  businessName                String?
   persona                     String?
   fallbackMessage             String   @default("Terima kasih, pesan Anda akan dibantu admin kami.")
   createdAt                   DateTime @default(now())
@@ -322,12 +325,14 @@ model CrmSessionAiSetting {
 }
 
 model CrmChatAiSetting {
-  id        String   @id @default(cuid())
-  userId    String
-  chatId    String   @unique
-  mode      String   @default("inherit")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String    @id @default(cuid())
+  userId      String
+  chatId      String    @unique
+  mode        String    @default("inherit")
+  pausedUntil DateTime?
+  pauseReason String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)

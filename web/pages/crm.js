@@ -36,7 +36,10 @@ const defaultCrmSettings = {
   similarityThreshold: 0.72,
   maxChunks: 6,
   cooldownSeconds: 180,
+  adminPauseSeconds: 1800,
   maxAutoRepliesPerChatPerDay: 20,
+  assistantName: "OpenWA CRM Assistant",
+  businessName: "",
   persona:
     "Ramah, jelas, profesional, dan membantu. Gunakan Bahasa Indonesia natural.",
   fallbackMessage: "Terima kasih, pesan Anda akan dibantu admin kami.",
@@ -93,9 +96,17 @@ function modeLabel(value) {
   return automationModes.find((mode) => mode.value === value)?.label || value;
 }
 
+function isWhatsappGroupChat(chat) {
+  return String(chat?.contact?.externalId || "")
+    .toLowerCase()
+    .endsWith("@g.us");
+}
+
 function resolveChatMode(settings, chat) {
   const chatMode = settings.chatModes?.[chat?.id];
   if (chatMode && chatMode !== "inherit") return chatMode;
+
+  if (isWhatsappGroupChat(chat)) return "off";
 
   const sessionMode = settings.sessionModes?.[chat?.sessionId];
   if (sessionMode && sessionMode !== "inherit") return sessionMode;
@@ -1183,6 +1194,15 @@ export default function CrmPage() {
                     <span className="font-semibold text-white">
                       {modeLabel(effectiveMode)}
                     </span>
+                    {isWhatsappGroupChat(activeChat) &&
+                    (settings.chatModes?.[activeChat.id] || "inherit") !==
+                      "auto" ? (
+                      <p className="mt-2 text-amber-100/75">
+                        WhatsApp groups are not auto-replied by default. Set this
+                        chat override to Auto send to enable replies for this
+                        group.
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -1308,6 +1328,26 @@ export default function CrmPage() {
                     }
                   />
                   <label className="mt-3 block text-xs text-white/45">
+                    Admin reply pause seconds
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="86400"
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none"
+                    value={settings.adminPauseSeconds}
+                    onChange={(event) =>
+                      updateNumberSetting(
+                        "adminPauseSeconds",
+                        event.target.value,
+                      )
+                    }
+                  />
+                  <p className="mt-2 text-xs leading-5 text-white/35">
+                    Auto-reply pauses per customer after an admin replies from
+                    OpenWA, API, or the paired WhatsApp app.
+                  </p>
+                  <label className="mt-3 block text-xs text-white/45">
                     Max auto replies per chat per day
                   </label>
                   <input
@@ -1323,6 +1363,48 @@ export default function CrmPage() {
                       )
                     }
                   />
+                  <label className="mt-3 block text-xs text-white/45">
+                    Assistant name
+                  </label>
+                  <input
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                    placeholder="OpenWA CRM Assistant"
+                    value={settings.assistantName || ""}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        assistantName: event.target.value,
+                      }))
+                    }
+                    onBlur={(event) =>
+                      saveCrmSettingsPatch({
+                        assistantName: event.target.value,
+                      })
+                    }
+                  />
+                  <label className="mt-3 block text-xs text-white/45">
+                    Business name
+                  </label>
+                  <input
+                    className="mt-2 w-full rounded-2xl bg-[#111b21] px-3 py-2 text-sm text-white outline-none placeholder:text-white/30"
+                    placeholder="Tukang Beberes"
+                    value={settings.businessName || ""}
+                    onChange={(event) =>
+                      setSettings((current) => ({
+                        ...current,
+                        businessName: event.target.value,
+                      }))
+                    }
+                    onBlur={(event) =>
+                      saveCrmSettingsPatch({
+                        businessName: event.target.value,
+                      })
+                    }
+                  />
+                  <p className="mt-2 text-xs leading-5 text-white/35">
+                    Used when customers ask who the bot is on WhatsApp or
+                    Telegram CRM chats.
+                  </p>
                   <label className="mt-3 block text-xs text-white/45">
                     Persona / brand voice
                   </label>

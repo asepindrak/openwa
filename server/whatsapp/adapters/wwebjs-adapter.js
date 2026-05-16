@@ -11,7 +11,7 @@ const {
   ensureRuntimeDirs,
 } = require("../../utils/paths");
 const { prisma } = require("../../database/client");
-const { storeIncomingMessage } = require("../../services/chat-service");
+const chatService = require("../../services/chat-service");
 
 function resolveStoredMediaPath(relativePath) {
   const normalized = String(relativePath || "")
@@ -186,7 +186,7 @@ class WwebjsAdapter extends EventEmitter {
         }
 
         // Emit to backend (store in DB)
-        await storeIncomingMessage({
+        await chatService.storeIncomingMessage({
           userId: this.session.userId,
           sessionId: this.session.id,
           sender: chatId,
@@ -199,6 +199,29 @@ class WwebjsAdapter extends EventEmitter {
         });
       })().catch((error) => {
         console.error("Failed to process incoming WhatsApp message.", error);
+      });
+    });
+
+    this.client.on("message_create", (message) => {
+      void (async () => {
+        if (!message.fromMe) return;
+
+        const receiver = String(message.to || "");
+        const isPrivateChat = receiver.endsWith("@c.us");
+        const isGroupChat = receiver.endsWith("@g.us");
+        if (!isPrivateChat && !isGroupChat) return;
+
+        await chatService.storeExternalOutgoingMessage({
+          userId: this.session.userId,
+          sessionId: this.session.id,
+          receiver,
+          displayName: receiver,
+          body: message.body || null,
+          type: message.type || "text",
+          externalMessageId: message.id?._serialized || null,
+        });
+      })().catch((error) => {
+        console.error("Failed to process outgoing WhatsApp message.", error);
       });
     });
 

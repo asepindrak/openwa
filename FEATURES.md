@@ -74,6 +74,8 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Per-session automation mode overrides for WhatsApp sessions
 - AI draft generation from recent conversation context
 - AI auto-reply for inbound customer messages
+- Auto-reply pauses temporarily per chat after an admin replies from OpenWA or the WhatsApp app
+- WhatsApp group auto-reply is off by default and requires an explicit per-chat Auto send override
 - Knowledge-base grounded responses using uploaded documents
 - Conversation-aware prompts with recent message transcript
 - Multi-message debounce before auto-reply so rapid follow-up messages are answered as one context
@@ -84,6 +86,7 @@ This document lists all features available in OpenWA, extracted from the API spe
 - Daily maximum auto-reply limit per chat
 - CRM automation activity logs for sent replies, generated drafts, skips, and errors
 - Source snippets stored with automation logs for traceability
+- CRM assistant name and business name configuration for stable bot identity
 - Persona and brand voice configuration
 - Fallback message configuration
 - Knowledge similarity threshold, maximum chunks, and embedding model settings

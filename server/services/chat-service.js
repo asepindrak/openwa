@@ -1,6 +1,7 @@
 const path = require("path");
 const { prisma } = require("../database/client");
 const { createAvatarDataUrl } = require("../utils/avatar");
+const crmService = require("./crm-service");
 const { v4: uuidv4 } = require("uuid");
 
 let incomingMessageQueue = Promise.resolve();
@@ -602,6 +603,7 @@ async function createOutgoingMessage({
   type = "text",
   mediaFileId = null,
   replyToId = null,
+  skipCrmAutoPause = false,
 }) {
   const chat = await retryOnSqliteTimeout(async () => {
     return prisma.chat.findFirst({
@@ -681,6 +683,165 @@ async function createOutgoingMessage({
     });
   });
   await touchContactPreview(chat.contactId, sanitizedPreview(body, type), 0);
+
+  if (!skipCrmAutoPause) {
+    await crmService
+      .pauseAutoReplyForChat(userId, chat.id, {
+        reason: "admin-replied",
+      })
+      .catch((error) => {
+        console.warn(
+          `[ChatService] Failed to pause CRM auto-reply for chat ${chat.id}:`,
+          error.message,
+        );
+      });
+  }
+
+  return {
+    chat: await loadChatSummary(chat.id),
+    message: mapMessage(message),
+  };
+}
+
+async function storeExternalOutgoingMessage({
+  userId,
+  sessionId,
+  receiver,
+  body,
+  type = "text",
+  mediaFileId = null,
+  externalMessageId = null,
+  displayName = null,
+}) {
+  const chat = await ensureChatForIncoming({
+    userId,
+    sessionId,
+    externalId: receiver,
+    displayName: displayName || receiver,
+  });
+
+  const existing = externalMessageId
+    ? await retryOnSqliteTimeout(() =>
+        prisma.message.findFirst({
+          where: {
+            chatId: chat.id,
+            externalMessageId,
+          },
+          include: {
+            statuses: {
+              orderBy: { createdAt: "asc" },
+            },
+            mediaFile: true,
+            replyTo: {
+              include: {
+                mediaFile: true,
+              },
+            },
+          },
+        }),
+      )
+    : null;
+
+  if (existing) {
+    return {
+      chat: await loadChatSummary(chat.id),
+      message: mapMessage(existing),
+      duplicate: true,
+    };
+  }
+
+  const recentMatching = await retryOnSqliteTimeout(() =>
+    prisma.message.findFirst({
+      where: {
+        chatId: chat.id,
+        direction: "outbound",
+        body: body || null,
+        type,
+        createdAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+      },
+      orderBy: { createdAt: "desc" },
+      include: {
+        statuses: {
+          orderBy: { createdAt: "asc" },
+        },
+        mediaFile: true,
+        replyTo: {
+          include: {
+            mediaFile: true,
+          },
+        },
+      },
+    }),
+  );
+
+  if (recentMatching) {
+    const updated = externalMessageId
+      ? await retryOnSqliteTimeout(() =>
+          prisma.message.update({
+            where: { id: recentMatching.id },
+            data: { externalMessageId },
+            include: {
+              statuses: {
+                orderBy: { createdAt: "asc" },
+              },
+              mediaFile: true,
+              replyTo: {
+                include: {
+                  mediaFile: true,
+                },
+              },
+            },
+          }),
+        )
+      : recentMatching;
+
+    return {
+      chat: await loadChatSummary(chat.id),
+      message: mapMessage(updated),
+      duplicate: true,
+    };
+  }
+
+  const message = await retryOnSqliteTimeout(() =>
+    prisma.message.create({
+      data: {
+        chatId: chat.id,
+        sessionId,
+        mediaFileId,
+        externalMessageId,
+        sender: `user:${userId}`,
+        receiver,
+        body: body || null,
+        type,
+        direction: "outbound",
+        statuses: {
+          create: [{ status: "sent" }, { status: "delivered" }],
+        },
+      },
+      include: {
+        statuses: {
+          orderBy: { createdAt: "asc" },
+        },
+        mediaFile: true,
+        replyTo: {
+          include: {
+            mediaFile: true,
+          },
+        },
+      },
+    }),
+  );
+
+  await retryOnSqliteTimeout(() =>
+    prisma.chat.update({
+      where: { id: chat.id },
+      data: { updatedAt: new Date() },
+    }),
+  );
+  await touchContactPreview(chat.contactId, sanitizedPreview(body, type), 0);
+  await crmService.pauseAutoReplyForChat(userId, chat.id, {
+    reason: "admin-replied-whatsapp-app",
+  });
 
   return {
     chat: await loadChatSummary(chat.id),
@@ -1430,6 +1591,7 @@ module.exports = {
   syncWhatsappSnapshot,
   storeIncomingMessage,
   storeIncomingMessageInChat,
+  storeExternalOutgoingMessage,
   pinChat,
   unpinChat,
   updateContact,

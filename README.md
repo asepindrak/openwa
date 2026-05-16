@@ -456,7 +456,11 @@ Upload a file first, then use the returned `mediaFileId` when calling the send m
 - `POST /api/crm/chats/{chatId}/draft`
 - `GET /api/crm/logs`
 
-CRM settings include automation mode, persona, fallback message, knowledge retrieval settings, abuse cooldown, and daily reply limits.
+CRM settings include automation mode, assistant name, business name, persona, fallback message, knowledge retrieval settings, abuse cooldown, and daily reply limits.
+
+When an admin replies to a customer from the OpenWA dashboard, the API, or the paired WhatsApp app, CRM auto-reply pauses for that chat temporarily. The default pause is 30 minutes and can be changed with `adminPauseSeconds` in CRM settings.
+
+WhatsApp group chats are not auto-replied by default, even when the global or session mode is **Auto send**. Set the specific group chat override to **Auto send** to enable auto-reply for that group.
 
 To use OpenWA as a gateway/API only, set internal CRM automation mode to **Off**, configure an incoming webhook, and let the external app reply through `/api/chats/{chatId}/messages/send` or `/api/messages/send`.
 

@@ -10,7 +10,10 @@ const defaultSettings = {
   similarityThreshold: 0.72,
   maxChunks: 6,
   cooldownSeconds: 180,
+  adminPauseSeconds: 1800,
   maxAutoRepliesPerChatPerDay: 20,
+  assistantName: "OpenWA CRM Assistant",
+  businessName: null,
   persona:
     "Ramah, jelas, profesional, dan membantu. Gunakan Bahasa Indonesia natural.",
   fallbackMessage: "Terima kasih, pesan Anda akan dibantu admin kami.",
@@ -73,7 +76,10 @@ function serializeSettings(global, sessionRows, chatRows) {
         similarityThreshold: global.similarityThreshold,
         maxChunks: global.maxChunks,
         cooldownSeconds: global.cooldownSeconds,
+        adminPauseSeconds: global.adminPauseSeconds,
         maxAutoRepliesPerChatPerDay: global.maxAutoRepliesPerChatPerDay,
+        assistantName: global.assistantName,
+        businessName: global.businessName,
         persona: global.persona,
         fallbackMessage: global.fallbackMessage,
       }
@@ -144,6 +150,16 @@ async function updateSettings(userId, payload = {}) {
     );
   }
 
+  if (payload.adminPauseSeconds !== undefined) {
+    data.adminPauseSeconds = Math.round(
+      clampNumber(payload.adminPauseSeconds, {
+        min: 0,
+        max: 86400,
+        fallback: defaultSettings.adminPauseSeconds,
+      }),
+    );
+  }
+
   if (payload.maxAutoRepliesPerChatPerDay !== undefined) {
     data.maxAutoRepliesPerChatPerDay = Math.round(
       clampNumber(payload.maxAutoRepliesPerChatPerDay, {
@@ -156,6 +172,16 @@ async function updateSettings(userId, payload = {}) {
 
   if (payload.fallbackMessage !== undefined) {
     data.fallbackMessage = String(payload.fallbackMessage || "").trim();
+  }
+
+  if (payload.assistantName !== undefined) {
+    data.assistantName =
+      String(payload.assistantName || "").trim() ||
+      defaultSettings.assistantName;
+  }
+
+  if (payload.businessName !== undefined) {
+    data.businessName = String(payload.businessName || "").trim() || null;
   }
 
   if (payload.persona !== undefined) {
@@ -237,11 +263,88 @@ async function setChatMode(userId, chatId, mode) {
   return { ok: true, mode: normalized };
 }
 
+async function pauseAutoReplyForChat(
+  userId,
+  chatId,
+  { seconds, reason = "admin-replied" } = {},
+) {
+  const chat = await retryOnSqliteTimeout(() =>
+    prisma.chat.findFirst({ where: { id: chatId, userId } }),
+  );
+  if (!chat) throw new Error("Chat not found.");
+
+  const settings = await getSettings(userId);
+  const pauseSeconds = Math.round(
+    clampNumber(seconds, {
+      min: 0,
+      max: 86400,
+      fallback: settings.adminPauseSeconds,
+    }),
+  );
+  if (pauseSeconds <= 0) {
+    return { ok: true, pausedUntil: null };
+  }
+
+  const pausedUntil = new Date(Date.now() + pauseSeconds * 1000);
+  await retryOnSqliteTimeout(() =>
+    prisma.crmChatAiSetting.upsert({
+      where: { userId_chatId: { userId, chatId } },
+      update: {
+        pausedUntil,
+        pauseReason: reason,
+      },
+      create: {
+        userId,
+        chatId,
+        mode: "inherit",
+        pausedUntil,
+        pauseReason: reason,
+      },
+    }),
+  );
+
+  await createAutomationLog(userId, {
+    chatId,
+    mode: await resolveModeForChat(userId, chat),
+    action: "paused",
+    reason,
+    metadata: {
+      pausedUntil,
+      pauseSeconds,
+    },
+  });
+
+  return { ok: true, pausedUntil, pauseSeconds };
+}
+
+async function getChatPause(userId, chatId) {
+  const row = await retryOnSqliteTimeout(() =>
+    prisma.crmChatAiSetting.findFirst({
+      where: {
+        userId,
+        chatId,
+        pausedUntil: { gt: new Date() },
+      },
+    }),
+  );
+
+  if (!row) return null;
+  return {
+    pausedUntil: row.pausedUntil,
+    reason: row.pauseReason || "admin-replied",
+  };
+}
+
 async function resolveModeForChat(userId, chat) {
   if (!chat) return defaultSettings.defaultMode;
   const settings = await getSettings(userId);
   const chatMode = settings.chatModes?.[chat.id];
   if (chatMode && chatMode !== "inherit") return chatMode;
+
+  const externalId = String(chat.contact?.externalId || "").toLowerCase();
+  if (externalId.endsWith("@g.us")) {
+    return "off";
+  }
 
   const sessionMode = settings.sessionModes?.[chat.sessionId];
   if (sessionMode && sessionMode !== "inherit") return sessionMode;
@@ -397,6 +500,8 @@ module.exports = {
   updateSettings,
   setSessionMode,
   setChatMode,
+  pauseAutoReplyForChat,
+  getChatPause,
   resolveModeForChat,
   createAutomationLog,
   listAutomationLogs,

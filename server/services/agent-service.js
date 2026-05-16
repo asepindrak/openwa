@@ -1910,12 +1910,14 @@ async function handleAssistantMessage(userId, chatId, input, ctx = {}) {
   const assistantSender =
     (userResult && userResult.message && userResult.message.receiver) ||
     "openwa:assistant";
+  const chatContact = userResult?.chat?.contact || null;
+  const isTelegramRemoteAssistant = String(
+    chatContact?.externalId || assistantSender || "",
+  ).startsWith("tg:");
   const assistantDisplayName =
-    (userResult &&
-      userResult.chat &&
-      userResult.chat.contact &&
-      userResult.chat.contact.displayName) ||
-    "OpenWA Assistant";
+    !isTelegramRemoteAssistant && chatContact?.displayName
+      ? chatContact.displayName
+      : "OpenWA Assistant";
   try {
     io.to(`user:${userId}`).emit("new_message", userResult.message);
     io.to(`user:${userId}`).emit("contact_list_update", userResult.chat);
@@ -2415,6 +2417,7 @@ async function sendAssistantMessage(
         body,
         type: mediaFileId ? "image" : "text",
         mediaFileId,
+        skipCrmAutoPause: true,
       });
       const deliveryJob = await outboundDeliveryService.enqueueMessage({
         userId,

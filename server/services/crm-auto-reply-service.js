@@ -45,6 +45,9 @@ function buildPrompt({ chat, messages, snippets, settings }) {
     String(chat.contact.externalId).startsWith("tg:")
       ? "Telegram"
       : "WhatsApp";
+  const assistantName =
+    String(settings.assistantName || "").trim() || "OpenWA CRM Assistant";
+  const businessName = String(settings.businessName || "").trim();
   const knowledgeContext = snippets.length
     ? snippets
         .map(
@@ -63,7 +66,10 @@ function buildPrompt({ chat, messages, snippets, settings }) {
     .join("\n");
 
   return [
-    `You are a CRM assistant replying to a ${channel} customer in Indonesian.`,
+    businessName
+      ? `You are ${assistantName}, the CRM assistant for ${businessName}, replying to a ${channel} customer in Indonesian.`
+      : `You are ${assistantName}, a CRM assistant replying to a ${channel} customer in Indonesian.`,
+    `If the customer asks who you are, answer using this assistant identity: ${assistantName}${businessName ? ` from ${businessName}` : ""}.`,
     `Persona and brand voice: ${settings.persona || "Ramah, jelas, profesional, dan membantu."}`,
     "Answer only using the provided knowledge snippets and conversation context.",
     "If the knowledge is insufficient, use the fallback message and do not invent details.",
@@ -150,6 +156,7 @@ async function createAndDeliverSystemNotice({
     chatId,
     body,
     type: "text",
+    skipCrmAutoPause: true,
   });
 
   if (io && userRoom) {
@@ -245,6 +252,7 @@ async function testKnowledgeChat(userId, question) {
         role: "user",
         content: [
           "You are testing a CRM knowledge base.",
+          `Assistant identity: ${settings.assistantName || "OpenWA CRM Assistant"}${settings.businessName ? ` for ${settings.businessName}` : ""}.`,
           `Persona and brand voice: ${settings.persona || "Ramah, jelas, profesional, dan membantu."}`,
           "Answer in Indonesian using only the provided knowledge snippets.",
           "If the snippets are insufficient, say that the knowledge base does not contain enough information.",
@@ -395,6 +403,35 @@ async function runAutoReply({
   mode,
 }) {
   const guard = await crmService.getAutoReplyGuard(userId, chat.id, settings);
+  const pause = await crmService.getChatPause(userId, chat.id);
+  if (pause) {
+    await crmService.createAutomationLog(userId, {
+      chatId: chat.id,
+      mode,
+      action: "skipped",
+      reason: "admin-paused",
+      inboundMessageId: inboundMessage?.id,
+      metadata: {
+        pausedUntil: pause.pausedUntil,
+        pauseReason: pause.reason,
+      },
+    });
+
+    if (io && userRoom) {
+      io.to(userRoom(userId)).emit("crm_activity_update", {
+        chatId: chat.id,
+        action: "skipped",
+      });
+    }
+
+    return {
+      skipped: true,
+      mode,
+      reason: "admin-paused",
+      pausedUntil: pause.pausedUntil,
+    };
+  }
+
   if (!guard.allowed) {
     let notice = null;
     const noticeBody = buildSkipNotice(guard.reason, guard.metadata);
@@ -499,6 +536,7 @@ async function runAutoReply({
     chatId: chat.id,
     body: result.draft,
     type: "text",
+    skipCrmAutoPause: true,
   });
 
   if (io && userRoom) {

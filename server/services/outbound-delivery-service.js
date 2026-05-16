@@ -127,13 +127,12 @@ async function deliverMessage({ message, sessionManager }) {
     if (!sessionManager?.sendMessage) {
       throw new Error("WhatsApp session manager is not available.");
     }
-    await sessionManager.sendMessage(message.sessionId, {
+    return sessionManager.sendMessage(message.sessionId, {
       recipient: message.receiver,
       body: message.body,
       mediaFileId: message.mediaFileId,
       mediaPath: message.mediaFile?.relativePath || null,
     });
-    return true;
   }
 
   if (transport === "telegram") {
@@ -158,7 +157,7 @@ async function deliverMessage({ message, sessionManager }) {
     if (!sent) {
       throw new Error("Telegram bot is not running.");
     }
-    return true;
+    return { externalMessageId: null };
   }
 
   throw new Error("No outbound transport is available for this message.");
@@ -207,7 +206,21 @@ async function processJob(jobOrId, { sessionManager, io } = {}) {
     emitJobUpdate(io, sendingJob);
 
     try {
-      await deliverMessage({ message: job.message, sessionManager });
+      const deliveryResult = await deliverMessage({
+        message: job.message,
+        sessionManager,
+      });
+      if (deliveryResult?.externalMessageId) {
+        await prisma.message.updateMany({
+          where: {
+            id: job.messageId,
+            externalMessageId: null,
+          },
+          data: {
+            externalMessageId: deliveryResult.externalMessageId,
+          },
+        });
+      }
       await markDelivered(job.messageId);
       const deliveredJob = await prisma.outboundDeliveryJob.update({
         where: { id: job.id },
