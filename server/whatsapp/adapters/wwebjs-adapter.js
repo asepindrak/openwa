@@ -70,21 +70,43 @@ function clearStaleChromiumProfileLocks(sessionId) {
   }
 
   const removed = [];
-  for (const fileName of ["SingletonLock", "SingletonSocket", "SingletonCookie"]) {
-    const filePath = path.join(profileDir, fileName);
-    if (!fs.existsSync(filePath)) continue;
-
-    if (fileName === "SingletonLock" && isLiveLocalSingletonLock(filePath)) {
-      throw new Error(
-        `Chromium profile is locked by a running local process. Stop that process before reconnecting: ${filePath}`,
-      );
+  const pending = [profileDir];
+  while (pending.length) {
+    const dir = pending.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (error) {
+      continue;
     }
 
-    fs.rmSync(filePath, { force: true, recursive: true });
-    removed.push(filePath);
+    for (const entry of entries) {
+      const filePath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(filePath);
+        continue;
+      }
+      if (!entry.name.startsWith("Singleton")) continue;
+
+      if (entry.name === "SingletonLock" && isLiveLocalSingletonLock(filePath)) {
+        throw new Error(
+          `Chromium profile is locked by a running local process. Stop that process before reconnecting: ${filePath}`,
+        );
+      }
+
+      fs.rmSync(filePath, { force: true, recursive: true });
+      removed.push(filePath);
+    }
   }
 
   return removed;
+}
+
+function logRemovedProfileLocks(sessionId, removedLocks) {
+  if (!removedLocks.length) return;
+  console.warn(
+    `[WwebjsAdapter] Removed stale Chromium profile locks for session ${sessionId}: ${removedLocks.join(", ")}`,
+  );
 }
 
 class WwebjsAdapter extends EventEmitter {
@@ -283,6 +305,10 @@ class WwebjsAdapter extends EventEmitter {
     });
 
     try {
+      logRemovedProfileLocks(
+        this.session.id,
+        clearStaleChromiumProfileLocks(this.session.id),
+      );
       await this.client.initialize();
     } catch (error) {
       if (skipProfileLockRetry || !isChromiumProfileLockError(error)) {
@@ -290,11 +316,7 @@ class WwebjsAdapter extends EventEmitter {
       }
 
       const removedLocks = clearStaleChromiumProfileLocks(this.session.id);
-      if (removedLocks.length) {
-        console.warn(
-          `[WwebjsAdapter] Removed stale Chromium profile locks for session ${this.session.id}: ${removedLocks.join(", ")}`,
-        );
-      }
+      logRemovedProfileLocks(this.session.id, removedLocks);
 
       try {
         await this.client.destroy();
