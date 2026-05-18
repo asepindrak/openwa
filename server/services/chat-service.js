@@ -69,7 +69,11 @@ function mapMessage(message) {
 function getChatTransportType(contactExternalId) {
   const normalized = String(contactExternalId || "").toLowerCase();
   if (normalized.startsWith("tg:")) return "telegram";
-  if (normalized.endsWith("@c.us") || normalized.endsWith("@g.us"))
+  if (
+    normalized.endsWith("@c.us") ||
+    normalized.endsWith("@g.us") ||
+    normalized.endsWith("@lid")
+  )
     return "whatsapp";
   return null;
 }
@@ -150,9 +154,11 @@ function sanitizedPreview(body, type) {
 }
 
 function isWhatsAppConversationId(externalId) {
+  const normalized = String(externalId || "").toLowerCase();
   return (
-    String(externalId || "").endsWith("@c.us") ||
-    String(externalId || "").endsWith("@g.us")
+    normalized.endsWith("@c.us") ||
+    normalized.endsWith("@g.us") ||
+    normalized.endsWith("@lid")
   );
 }
 
@@ -988,6 +994,36 @@ async function storeIncomingMessageInChat({
     throw new Error("Chat not found.");
   }
 
+  if (externalMessageId) {
+    const existingMessage = await retryOnSqliteTimeout(() =>
+      prisma.message.findFirst({
+        where: {
+          chatId: chat.id,
+          externalMessageId,
+          direction: "inbound",
+        },
+        include: {
+          statuses: {
+            orderBy: { createdAt: "asc" },
+          },
+          mediaFile: true,
+          replyTo: {
+            include: {
+              mediaFile: true,
+            },
+          },
+        },
+      }),
+    );
+
+    if (existingMessage) {
+      return {
+        chat: await loadChatSummary(chat.id),
+        message: mapMessage(existingMessage),
+      };
+    }
+  }
+
   const dataObj = {
     chatId: chat.id,
     sessionId: chat.sessionId,
@@ -1053,6 +1089,7 @@ async function listContacts(userId, sessionId, search) {
             OR: [
               { externalId: { endsWith: "@c.us" } },
               { externalId: { endsWith: "@g.us" } },
+              { externalId: { endsWith: "@lid" } },
             ],
           },
           ...(normalizedSearch
@@ -1096,7 +1133,7 @@ async function normalizeWhatsappExternalId(value) {
     throw new Error("phoneNumber is required.");
   }
 
-  if (raw.endsWith("@c.us") || raw.endsWith("@g.us")) {
+  if (raw.endsWith("@c.us") || raw.endsWith("@g.us") || raw.endsWith("@lid")) {
     return raw;
   }
 

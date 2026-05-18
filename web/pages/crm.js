@@ -168,6 +168,8 @@ export default function CrmPage() {
   const [personaInput, setPersonaInput] = useState("");
   const [personaGenerating, setPersonaGenerating] = useState(false);
   const [automationLogs, setAutomationLogs] = useState([]);
+  const adoptedDraftLogIdRef = useRef(null);
+  const pendingDraftLogRef = useRef(null);
 
   const activeChat = useMemo(
     () => chats.find((chat) => chat.id === activeChatId) || null,
@@ -288,6 +290,36 @@ export default function CrmPage() {
     if (!token || !activeChatId) return;
     loadAutomationLogs(activeChatId);
   }, [activeChatId, loadAutomationLogs, token]);
+
+  useEffect(() => {
+    adoptedDraftLogIdRef.current = null;
+    setDraft("");
+    setDraftSources([]);
+
+    const pendingDraftLog = pendingDraftLogRef.current;
+    if (pendingDraftLog?.chatId === activeChatId) {
+      pendingDraftLogRef.current = null;
+      adoptedDraftLogIdRef.current = pendingDraftLog.id;
+      setDraft(String(pendingDraftLog.draft || "").trim());
+      setDraftSources(pendingDraftLog.sources || []);
+    }
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!activeChatId) return;
+    const latestDraftLog = automationLogs.find(
+      (log) => log.chatId === activeChatId && log.draft,
+    );
+    if (!latestDraftLog) return;
+
+    if (draft.trim() && adoptedDraftLogIdRef.current !== latestDraftLog.id) {
+      return;
+    }
+
+    adoptedDraftLogIdRef.current = latestDraftLog.id;
+    setDraft(String(latestDraftLog.draft || "").trim());
+    setDraftSources(latestDraftLog.sources || []);
+  }, [activeChatId, automationLogs, draft]);
 
   useEffect(() => {
     if (!token) return undefined;
@@ -583,8 +615,9 @@ export default function CrmPage() {
     }
   }
 
-  async function sendDraft() {
-    if (!socket || !activeChatId || !draft.trim()) return;
+  async function sendDraftText(text, chatId = activeChatId, { clearComposer = false } = {}) {
+    const body = String(text || "").trim();
+    if (!socket || !chatId || !body) return;
 
     setSending(true);
     setError("");
@@ -593,8 +626,8 @@ export default function CrmPage() {
         socket.emit(
           "send_message",
           {
-            chatId: activeChatId,
-            body: draft.trim(),
+            chatId,
+            body,
             type: "text",
           },
           (response) => {
@@ -606,13 +639,34 @@ export default function CrmPage() {
           },
         );
       });
-      setDraft("");
-      setDraftSources([]);
+      if (clearComposer || chatId === activeChatId) {
+        setDraft("");
+        setDraftSources([]);
+        adoptedDraftLogIdRef.current = null;
+      }
     } catch (requestError) {
       setError(requestError.message);
     } finally {
       setSending(false);
     }
+  }
+
+  async function sendDraft() {
+    await sendDraftText(draft, activeChatId, { clearComposer: true });
+  }
+
+  function useAutomationDraft(log) {
+    if (!log?.draft) return;
+    if (log.chatId && log.chatId !== activeChatId) {
+      pendingDraftLogRef.current = log;
+      setActiveChat(log.chatId);
+      setActiveTab("inbox");
+      return;
+    }
+    adoptedDraftLogIdRef.current = log.id;
+    setDraft(String(log.draft || "").trim());
+    setDraftSources(log.sources || []);
+    setActiveTab("inbox");
   }
 
   if (!token) return null;
@@ -1588,9 +1642,32 @@ export default function CrmPage() {
                       ) : null}
                     </div>
                     {log.draft ? (
-                      <p className="mt-3 line-clamp-3 text-xs leading-5 text-white/55">
-                        {log.draft}
-                      </p>
+                      <>
+                        <p className="mt-3 line-clamp-3 text-xs leading-5 text-white/55">
+                          {log.draft}
+                        </p>
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-white/5 px-3 py-2 text-xs font-medium text-white/80 transition hover:bg-white/10"
+                            onClick={() => useAutomationDraft(log)}
+                          >
+                            <MdSmartToy />
+                            Use draft
+                          </button>
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-brand-500 px-3 py-2 text-xs font-semibold text-[#10251a] disabled:opacity-60"
+                            onClick={() =>
+                              sendDraftText(log.draft, log.chatId || activeChatId)
+                            }
+                            disabled={sending || !log.chatId}
+                          >
+                            <MdSend />
+                            {sending ? "Sending" : "Send draft"}
+                          </button>
+                        </div>
+                      </>
                     ) : null}
                   </div>
                 ))}

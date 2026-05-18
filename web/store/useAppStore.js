@@ -148,31 +148,40 @@ export const useAppStore = create((set, get) => ({
       // ignore storage errors
     }
 
-    set((state) => ({
-      user: payload.user,
-      sessions: payload.sessions || [],
-      chats: sortedChats,
-      terminalAutoApproveAll: !!settings.autoApproveAllTerminalCommands,
-      defaultAiProviderId: settings.defaultAiProviderId || null,
-      defaultAiModel: settings.defaultAiModel || null,
-      activeChatId: payload.activeChatId || sortedChats[0]?.id || null,
-      activeSessionId: state.activeSessionId || null,
-      messagesByChat: payload.activeChatId
-        ? {
-            ...state.messagesByChat,
-            [payload.activeChatId]: payload.messages || [],
-          }
-        : state.messagesByChat,
-      messageMetaByChat: payload.activeChatId
-        ? {
-            ...state.messageMetaByChat,
-            [payload.activeChatId]: {
-              hasMore: Boolean(payload.hasMoreMessages),
-              nextBefore: payload.nextBefore || null,
-            },
-          }
-        : state.messageMetaByChat,
-    }));
+    set((state) => {
+      const activeChatStillExists = sortedChats.some(
+        (chat) => chat.id === state.activeChatId,
+      );
+      const nextActiveChatId = activeChatStillExists
+        ? state.activeChatId
+        : payload.activeChatId || sortedChats[0]?.id || null;
+
+      return {
+        user: payload.user,
+        sessions: payload.sessions || [],
+        chats: sortedChats,
+        terminalAutoApproveAll: !!settings.autoApproveAllTerminalCommands,
+        defaultAiProviderId: settings.defaultAiProviderId || null,
+        defaultAiModel: settings.defaultAiModel || null,
+        activeChatId: nextActiveChatId,
+        activeSessionId: state.activeSessionId || null,
+        messagesByChat: payload.activeChatId
+          ? {
+              ...state.messagesByChat,
+              [payload.activeChatId]: payload.messages || [],
+            }
+          : state.messagesByChat,
+        messageMetaByChat: payload.activeChatId
+          ? {
+              ...state.messageMetaByChat,
+              [payload.activeChatId]: {
+                hasMore: Boolean(payload.hasMoreMessages),
+                nextBefore: payload.nextBefore || null,
+              },
+            }
+          : state.messageMetaByChat,
+      };
+    });
   },
   setMessages: (chatId, messages, meta = null) => {
     set((state) => ({

@@ -109,14 +109,53 @@ function logRemovedProfileLocks(sessionId, removedLocks) {
   );
 }
 
+function normalizeWwebjsMessageType(type) {
+  const normalized = String(type || "text").toLowerCase();
+  if (normalized === "image") return "image";
+  if (normalized === "video") return "video";
+  if (normalized === "audio" || normalized === "ptt" || normalized === "voice")
+    return "audio";
+  if (normalized === "sticker") return "sticker";
+  if (
+    normalized === "document" ||
+    normalized === "document_with_caption" ||
+    normalized === "file"
+  ) {
+    return "document";
+  }
+  return "text";
+}
+
+function isWhatsAppPrivateId(externalId) {
+  const normalized = String(externalId || "").toLowerCase();
+  return normalized.endsWith("@c.us") || normalized.endsWith("@lid");
+}
+
+function isWhatsAppGroupId(externalId) {
+  return String(externalId || "").toLowerCase().endsWith("@g.us");
+}
+
+function isWhatsAppConversationId(externalId) {
+  return isWhatsAppPrivateId(externalId) || isWhatsAppGroupId(externalId);
+}
+
 class WwebjsAdapter extends EventEmitter {
   constructor({ session }) {
     super();
     this.session = session;
     this.client = null;
+    this.inboundMessageIds = new Set();
   }
 
   async resolveProfilePic(externalId) {
+    if (isWhatsAppGroupId(externalId)) {
+      return {
+        url: null,
+        status: "skipped",
+        reason: "group-profile-photo-skipped",
+      };
+    }
+
     if (!this.client || !externalId) {
       return {
         url: null,
@@ -166,6 +205,71 @@ class WwebjsAdapter extends EventEmitter {
     }
 
     return result.url;
+  }
+
+  rememberInboundMessage(externalMessageId) {
+    if (!externalMessageId) return true;
+    if (this.inboundMessageIds.has(externalMessageId)) return false;
+
+    this.inboundMessageIds.add(externalMessageId);
+    setTimeout(() => {
+      this.inboundMessageIds.delete(externalMessageId);
+    }, 5 * 60 * 1000).unref?.();
+    return true;
+  }
+
+  async emitIncomingMessage(message) {
+    const chatId = String(message.from || "");
+    const isPrivateChat = isWhatsAppPrivateId(chatId);
+    const isGroupChat = isWhatsAppGroupId(chatId);
+    if (!isPrivateChat && !isGroupChat) return;
+
+    const externalMessageId = message.id?._serialized || null;
+    if (!this.rememberInboundMessage(externalMessageId)) return;
+
+    let mediaFileId = null;
+    let type = normalizeWwebjsMessageType(message.type);
+    let body = message.body;
+
+    if (message.hasMedia) {
+      try {
+        const media = await message.downloadMedia();
+        if (media && media.data) {
+          if (!fs.existsSync(mediaDir))
+            fs.mkdirSync(mediaDir, { recursive: true });
+          const ext = media.mimetype.split("/")[1] || "bin";
+          const filename = `${uuidv4()}.${ext}`;
+          const filePath = path.join(mediaDir, filename);
+          fs.writeFileSync(filePath, Buffer.from(media.data, "base64"));
+          const mediaFile = await prisma.mediaFile.create({
+            data: {
+              userId: this.session.userId,
+              fileName: filename,
+              originalName: filename,
+              mimeType: media.mimetype,
+              size: Buffer.from(media.data, "base64").length,
+              relativePath: `media/${filename}`,
+            },
+          });
+          mediaFileId = mediaFile.id;
+          type = normalizeWwebjsMessageType(message.type);
+          if (media.caption) body = media.caption;
+        }
+      } catch (err) {
+        console.error("Failed to download WhatsApp media:", err);
+      }
+    }
+
+    this.emit("message", {
+      sender: chatId,
+      displayName:
+        message._data?.notifyName || message._data?.pushname || chatId,
+      avatarUrl: isGroupChat ? null : await this.resolveProfilePicUrl(chatId),
+      body,
+      type,
+      mediaFileId,
+      externalMessageId,
+    });
   }
 
   async connect({ skipProfileLockRetry = false } = {}) {
@@ -223,71 +327,21 @@ class WwebjsAdapter extends EventEmitter {
     });
 
     this.client.on("message", (message) => {
-      void (async () => {
-        const chatId = String(message.from || "");
-        const isPrivateChat = chatId.endsWith("@c.us");
-        const isGroupChat = chatId.endsWith("@g.us");
-        if (!isPrivateChat && !isGroupChat) return;
-
-        let mediaFileId = null;
-        let type = message.type || "text";
-        let body = message.body;
-
-        if (message.hasMedia) {
-          try {
-            const media = await message.downloadMedia();
-            if (media && media.data) {
-              if (!fs.existsSync(mediaDir))
-                fs.mkdirSync(mediaDir, { recursive: true });
-              const ext = media.mimetype.split("/")[1] || "bin";
-              const filename = `${uuidv4()}.${ext}`;
-              const filePath = path.join(mediaDir, filename);
-              fs.writeFileSync(filePath, Buffer.from(media.data, "base64"));
-              // Create media_files entry
-              const mediaFile = await prisma.mediaFile.create({
-                data: {
-                  userId: this.session.userId,
-                  fileName: filename,
-                  originalName: filename,
-                  mimeType: media.mimetype,
-                  size: Buffer.from(media.data, "base64").length,
-                  relativePath: `media/${filename}`,
-                },
-              });
-              mediaFileId = mediaFile.id;
-              type = message.type;
-              // For images/videos, body is usually caption
-              if (media.caption) body = media.caption;
-            }
-          } catch (err) {
-            console.error("Failed to download WhatsApp media:", err);
-          }
-        }
-
-        // Emit to backend (store in DB)
-        await chatService.storeIncomingMessage({
-          userId: this.session.userId,
-          sessionId: this.session.id,
-          sender: chatId,
-          displayName:
-            message._data?.notifyName || message._data?.pushname || chatId,
-          avatarUrl: await this.resolveProfilePicUrl(chatId),
-          body,
-          type,
-          mediaFileId,
-        });
-      })().catch((error) => {
+      void this.emitIncomingMessage(message).catch((error) => {
         console.error("Failed to process incoming WhatsApp message.", error);
       });
     });
 
     this.client.on("message_create", (message) => {
       void (async () => {
-        if (!message.fromMe) return;
+        if (!message.fromMe) {
+          await this.emitIncomingMessage(message);
+          return;
+        }
 
         const receiver = String(message.to || "");
-        const isPrivateChat = receiver.endsWith("@c.us");
-        const isGroupChat = receiver.endsWith("@g.us");
+        const isPrivateChat = isWhatsAppPrivateId(receiver);
+        const isGroupChat = isWhatsAppGroupId(receiver);
         if (!isPrivateChat && !isGroupChat) return;
 
         await chatService.storeExternalOutgoingMessage({
@@ -296,7 +350,7 @@ class WwebjsAdapter extends EventEmitter {
           receiver,
           displayName: receiver,
           body: message.body || null,
-          type: message.type || "text",
+          type: normalizeWwebjsMessageType(message.type),
           externalMessageId: message.id?._serialized || null,
         });
       })().catch((error) => {
@@ -456,7 +510,7 @@ class WwebjsAdapter extends EventEmitter {
         continue;
       }
 
-      if (!externalId.endsWith("@c.us") && !externalId.endsWith("@g.us")) {
+      if (!isWhatsAppConversationId(externalId)) {
         continue;
       }
 
@@ -498,7 +552,7 @@ class WwebjsAdapter extends EventEmitter {
                   ? `user:${this.session.userId}`
                   : message.author || message.from || externalId,
                 body: message.body || null,
-                type: message.type,
+                type: normalizeWwebjsMessageType(message.type),
                 direction: message.fromMe ? "outbound" : "inbound",
                 ack: message.ack ?? 0,
                 createdAt: new Date(
